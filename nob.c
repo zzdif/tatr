@@ -367,6 +367,9 @@ int main(int argc, char **argv)
         if (!test_ls_query_not_stuck_to_open_paren(&r)) return 1;
         if (!test_ls_query_report_error_utf8(&r)) return 1;
         if (!test_ls_query_priority_above_20(&r)) return 1;
+
+        cmd_append(&cmd, "sh", "tests/setup.sh", BUILD_FOLDER"tatr");
+        if (!cmd_run(&cmd)) return 1;
     }
 
     if (run) {
@@ -377,6 +380,19 @@ int main(int argc, char **argv)
     }
 
     return 0;
+}
+
+bool embed_file(String_Builder *output, const char *path, const char *name)
+{
+    String_Builder content = {0};
+    if (!read_entire_file(path, &content)) return false;
+    sb_appendf(output, "static const unsigned char %s[] = {\n", name);
+    for (size_t i = 0; i < content.count; ++i) {
+        sb_appendf(output, "0x%02X,%s", (unsigned char)content.items[i], (i + 1)%20 == 0 ? "\n" : "");
+    }
+    sb_appendf(output, "\n};\n");
+    free(content.items);
+    return true;
 }
 
 bool make_build_h(Compiler compiler)
@@ -426,21 +442,14 @@ bool make_build_h(Compiler compiler)
 
     const char *tasks_readme_md_file = "tasks/README.md";
     if (file_exists(tasks_readme_md_file)) {
-        String_Builder sb_tasks_readme_md = {0};
-        if (!read_entire_file(tasks_readme_md_file, &sb_tasks_readme_md)) return false;
-        sb_appendf(&sb_build_h, "unsigned char tasks_readme_md[] = {\n");
-        for (size_t i = 0; i < sb_tasks_readme_md.count;) {
-            sb_appendf(&sb_build_h, "    ");
-            for (size_t j = 0; i < sb_tasks_readme_md.count && j < 20; ++i, ++j) {
-                sb_appendf(&sb_build_h, "0x%02X,", sb_tasks_readme_md.items[i]);
-            }
-            sb_appendf(&sb_build_h, "\n");
-        }
-        sb_appendf(&sb_build_h, "};\n");
+        if (!embed_file(&sb_build_h, tasks_readme_md_file, "tasks_readme_md")) return false;
         sb_appendf(&sb_build_h, "#define TASKS_README_MD tasks_readme_md\n");
     } else {
         nob_log(WARNING, "%s file doesn't exist. `tatr-init` will not create it along with the tasks/ folder", tasks_readme_md_file);
     }
+
+    if (!embed_file(&sb_build_h, "contrib/nvim/tatr.lua", "nvim_config")) return false;
+    if (!embed_file(&sb_build_h, "skills/tatr/SKILL.md", "agent_skill")) return false;
 
     sb_appendf(&sb_build_h, "#endif // BUILD_H_\n");
 

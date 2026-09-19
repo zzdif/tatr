@@ -107,6 +107,41 @@ You are welcome to make your own tools.
 
 ### Vim / Neovim
 
+#### Project-local Neovim setup
+
+Requires Neovim 0.9+ with its project-config trust mechanism. First enable project-local configuration in your own Neovim config (normally `~/.config/nvim/init.lua`):
+
+```lua
+vim.o.exrc = true
+```
+
+Then, with `tatr`, `git`, and `nvim` on `PATH`, run from the **target Git project's root**:
+
+```sh
+tatr nvim-setup
+```
+
+This first verifies the current directory is a Git worktree root, then checks Neovim's effective `exrc` setting, copies the bundled [configuration](./contrib/nvim/tatr.lua) to `.nvim.lua`, and adds `/.nvim.lua` to `.gitignore`. It reports each step. The check starts headless Neovim with your user configuration from `/`, outside the project; your configuration and plugins still execute. If Neovim is missing, reports startup errors, or has `exrc` disabled, setup stops before writing project files and asks you to fix your configuration yourself. It never edits your user config or approves trust for you.
+
+Review `.nvim.lua`, then open Neovim from the project and approve its trust prompt. Use:
+
+| Action | Command / key |
+| --- | --- |
+| List open tasks | `:Tasks` or `<leader>tt` |
+| Filter tasks | `:Tasks :bug and priority lt 50` |
+| List closed tasks | `:Tasks -c` |
+| Open a listed task | Enter in quickfix |
+| Next / previous task | `:cnext` / `:cprevious` |
+| Browse the opened task's folder | `<leader>td` (built-in netrw must be enabled) |
+
+The command and mappings are registered only if `tatr` is executable. If it isn't on `PATH`, edit the executable path in `.nvim.lua`. Your normal build settings are untouched. This configuration lasts for the Neovim session; changing directories does not unload it. Use one instance per project.
+
+Both setup commands require Git on `PATH` and must run at a Git worktree root (including linked worktrees). They reject subdirectories, non-Git folders, and bare repositories before probing Neovim or writing files. They never initialize Git or automatically move to a parent directory.
+
+Setup is idempotent: rerunning it with identical installed files succeeds without rewriting them or duplicating ignore entries. Differing existing files are preserved and reported as conflicts. To customize or update an existing installation, review/merge the template manually or move your file aside before rerunning setup. Ignore entries do not untrack files already committed to Git. Neither setup command creates a task database; use `tatr init` separately if needed.
+
+#### Manual setup for Vim or Neovim
+
 No plugin is needed. With `tatr` on your `PATH`, run these commands inside Vim or Neovim from your project directory (or any subdirectory):
 
 ```vim
@@ -136,14 +171,24 @@ These settings replace your normal `:make` command and output parser for the ses
 
 [skills/tatr/SKILL.md](./skills/tatr/SKILL.md) teaches an agent the CLI commands, TQL syntax, task format, and safe human-agent task maintenance workflow. It is reusable in other projects; the agent should work in the target project's directory, using a trusted `tatr` executable on `PATH` or an explicitly supplied absolute path.
 
-For Pi, install it from this checkout's root (the destination must not already exist):
+Install a project-local copy from the **target Git project's root** (Git must be on `PATH`):
+
+```sh
+tatr skill-setup
+```
+
+This creates `.agents/skills/tatr/SKILL.md` from the bundled skill and adds `/.agents/skills` to `.gitignore`, reporting what it changes or leaves unchanged. It preserves other skills and refuses to overwrite a differing existing tatr skill. Neovim and `exrc` are **not** required for this command. Setup refuses linked/special destination paths and does not stage, commit, or push anything. Run either setup command without concurrent filesystem writers; review any partially completed changes if an I/O error occurs.
+
+Start a new Pi session in that project and use `/skill:tatr`, or ask the agent to maintain its tasks. Pi discovers project-local skills after the project is trusted. Other Agent Skills-compatible tools must support the `.agents/skills/` location.
+
+Alternatively, for a global Pi installation, run from this source checkout's root (the destination must not already exist):
 
 ```sh
 mkdir -p ~/.agents/skills
 ln -s "$(pwd)/skills/tatr" ~/.agents/skills/tatr
 ```
 
-Start a new Pi session in the target project, then use `/skill:tatr` or ask the agent to maintain its tatr tasks. Keep this checkout in place while using the symlink. For other Agent Skills-compatible tools, use their documented skill location.
+Keep this checkout in place while using the global symlink. Choose one installation scope to avoid duplicate skill names in Pi. For other Agent Skills-compatible tools, use their documented skill location.
 
 ### Tatr Query Language (TQL)
 

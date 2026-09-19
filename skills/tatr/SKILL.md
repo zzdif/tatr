@@ -17,6 +17,9 @@ compatibility: Requires a trusted tatr executable on PATH or an explicitly suppl
 - `tatr` searches upward from the working directory for the nearest `tasks/` directory. Confirm this is the intended database before any mutation. A nested project without its own database can otherwise operate on a parent's tasks.
 - Before any write, verify the database and target paths stay inside the intended project and do not traverse symlinks. Stop on suspicious paths rather than changing their targets.
 - If initialization is requested, run `tatr init` **at the intended project root**. It creates `tasks/` and, when available, a default `tasks/README.md`; `tatr init -no-readme` omits that README. Do not initialize or replace another tracker without authorization.
+- On request, run `tatr skill-setup` at the target project root to install `.agents/skills/tatr/SKILL.md` and ignore `/.agents/skills`. It preserves other skills and refuses to overwrite a differing existing tatr skill. Prefer one installation scope to avoid duplicate skill names.
+- For project-local Neovim integration (Neovim 0.9+), `tatr nvim-setup` checks the user's effective `exrc` setting, then installs `.nvim.lua` and ignores `/.nvim.lua`. The user must enable `vim.o.exrc = true` themselves before running it and review/approve Neovim's trust prompt afterward. The check starts headless Neovim with the user's configuration; do not run either setup command unless requested. Neither command creates the task database or changes the user's global config. `skill-setup` does not require Neovim.
+- Both setup commands require Git on PATH and the current directory to be a Git worktree root (linked worktrees are supported). They reject subdirectories, non-Git folders, and bare repositories before probing Neovim or writing files; they never initialize Git or move to a parent directory. Repeating setup with identical files succeeds without rewriting them or duplicating ignore entries; customized files require manual review/merge. Existing tracked files are not untracked by adding ignore rules.
 - For a different tool version, consult `tatr <command> -help`; don't invent flags or assume JSON output exists.
 
 ## 2. Read before changing
@@ -134,6 +137,8 @@ Do not assume conventional `--` end-of-options handling: this build retains it i
 | Command | Behavior |
 | --- | --- |
 | `init [-no-readme]` | Create database in the current directory; writes files |
+| `nvim-setup` | Check Neovim `exrc`, install `.nvim.lua`, update `.gitignore`; user must approve trust |
+| `skill-setup` | Install `.agents/skills/tatr/SKILL.md` and update `.gitignore`; no Neovim needed |
 | `ls [-c] [-a] [-id] [QUERY...]` | List tasks; descending priority by default; `-a` reverses order; `-id` sorts by ID |
 | `ls -debug [QUERY...]` | Print query tokens/opcodes; does not evaluate against tasks or prove type correctness |
 | `new [-t TAG]... [-p N] [-s SUFFIX] [TITLE...]` | Create a task; writes files |
@@ -169,7 +174,9 @@ Apply the same path checks to direct file edits. Work as a normal user, not with
 - Verify with `tatr find <id>` and a narrow query in the correct status set. Inspect `git status --short` and `git diff -- tasks/` if using Git, and read new untracked task files (they are not shown in `git diff`); don't stage/commit, delete tasks, or discard unrelated changes unless asked.
 - Finish with the task IDs/paths changed, status, validation performed, and anything needing human action.
 
-For the human's Vim/Neovim session (`tatr` on PATH):
+With project-local Neovim setup, the human can use `:Tasks`, `:Tasks :bug`, or `:Tasks -c`; Enter opens a task, and `<leader>td` browses its folder after opening `TASK.md`. The command and mappings are registered only when `tatr` is executable. They remain active for the session, so use one Neovim instance per project.
+
+Alternatively, for a manual Vim/Neovim session (`tatr` on PATH):
 
 ```vim
 :set makeprg=tatr

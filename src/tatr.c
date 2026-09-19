@@ -818,7 +818,21 @@ bool version_run(Command *self, const char *program_name, int argc, char **argv)
     return true;
 }
 
+bool setup_run(Command *self, const char *program_name, int argc, char **argv);
+
 Command commands[] = {
+    {
+        .name = "nvim-setup",
+        .signature = "[OPTIONS]",
+        .description = "Install .nvim.lua and its .gitignore entry at a Git worktree root (requires Neovim exrc)",
+        .run = setup_run,
+    },
+    {
+        .name = "skill-setup",
+        .signature = "[OPTIONS]",
+        .description = "Install .agents/skills/tatr/SKILL.md and its .gitignore entry at a Git worktree root",
+        .run = setup_run,
+    },
     {
         .name = "init",
         .description = "Create tasks/ directory in the current working directory if it doesn't exist yet",
@@ -942,6 +956,7 @@ int main(int argc, char **argv)
 #include "md.c"
 #include "query.c"
 #include "task.c"
+#include "setup.c"
 
 #define NOB_IMPLEMENTATION
 #define NOB_OVERWRITE_TEMP_ON_REWIND
