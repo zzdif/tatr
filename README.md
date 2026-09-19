@@ -99,11 +99,51 @@ $ sudo cp ./build/tatr /usr/local/bin/
 $ tatr help
 ```
 
-It is specifically optimized to be run in compilation mode of Emacs. Not sure how useful it is outside of this use case.
+It is optimized for Emacs compilation mode, but its `path:line:message` task reports also work with Vim and Neovim's built-in quickfix list (see below).
 
 We only support Linux right now But I have tasks to add [Windows](./tasks/20260825-170729/TASK.md) and [MacOS](./tasks/20260901-063204/TASK.md) support in the future.
 
 You are welcome to make your own tools.
+
+### Vim / Neovim
+
+No plugin is needed. With `tatr` on your `PATH`, run these commands inside Vim or Neovim from your project directory (or any subdirectory):
+
+```vim
+:set makeprg=tatr
+:set errorformat=%f:%l:%m
+:make! ls
+:copen
+```
+
+Press Enter on a quickfix entry to open its `TASK.md`. Use `:cnext` / `:cprevious` to navigate. `:make!` fills quickfix without jumping to the first entry.
+
+The same setup works with queries and other commands:
+
+```vim
+:make! ls :bug and priority lt 50
+:make! ls -c
+:make! new -t bug Fix the parser
+:make! find 20260829-235855-rexim
+:make! ref 20260829-235855-rexim
+```
+
+Replace the example IDs with your own. Edit and save `TASK.md` normally to change its description, status, priority, or tags, then rerun `:make! ls` to refresh the list. Save changes before running commands that modify tasks, such as `untag`.
+
+These settings replace your normal `:make` command and output parser for the session; they are not required in your editor config. Informational output (such as "No tasks were found") remains visible in quickfix but is not a jump target. `summary` and `untag` do not produce per-task locations.
+
+### Agent skill
+
+[skills/tatr/SKILL.md](./skills/tatr/SKILL.md) teaches an agent the CLI commands, TQL syntax, task format, and safe human-agent task maintenance workflow. It is reusable in other projects; the agent should work in the target project's directory, using a trusted `tatr` executable on `PATH` or an explicitly supplied absolute path.
+
+For Pi, install it from this checkout's root (the destination must not already exist):
+
+```sh
+mkdir -p ~/.agents/skills
+ln -s "$(pwd)/skills/tatr" ~/.agents/skills/tatr
+```
+
+Start a new Pi session in the target project, then use `/skill:tatr` or ask the agent to maintain its tatr tasks. Keep this checkout in place while using the symlink. For other Agent Skills-compatible tools, use their documented skill location.
 
 ### Tatr Query Language (TQL)
 
