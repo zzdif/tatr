@@ -128,13 +128,14 @@ Review `.nvim.lua`, then open Neovim from the project and approve its trust prom
 | Action | Command / key |
 | --- | --- |
 | List open tasks | `:Tasks` or `<leader>tt` |
+| Create a task | `:Tasks new [-t tag] [-p N] Title...`, then the list refreshes |
 | Filter tasks | `:Tasks :bug and priority lt 50` |
 | List closed tasks | `:Tasks -c` |
 | Open a listed task | Enter in quickfix |
 | Next / previous task | `:cnext` / `:cprevious` |
-| Browse the opened task's folder | `<leader>td` (built-in netrw must be enabled) |
+| Browse the task's folder in a split | `:Tasks explore` or `<leader>td` (netrw's `:Explore`, or [oil.nvim](https://github.com/stevearc/oil.nvim); from the task list it follows the entry under the cursor) |
 
-The command and mappings are registered only if `tatr` is executable. If it isn't on `PATH`, edit the executable path in `.nvim.lua`. Your normal build settings are untouched. This configuration lasts for the Neovim session; changing directories does not unload it. Use one instance per project.
+The command and mappings are registered only if `tatr` is executable. If it isn't on `PATH`, edit the executable path in `.nvim.lua`. Task rows print paths relative to the directory `tatr` runs from; the script normalizes the redundant `./` prefix so rows render uniformly, and keeps `../` when Neovim runs in a subdirectory. Your normal build settings are untouched. This configuration lasts for the Neovim session; changing directories does not unload it. Use one instance per project.
 
 Both setup commands require Git on `PATH` and must run at a Git worktree root (including linked worktrees). They reject subdirectories, non-Git folders, and bare repositories before probing Neovim or writing files. They never initialize Git or automatically move to a parent directory.
 
