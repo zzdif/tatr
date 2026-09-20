@@ -174,7 +174,7 @@ Apply the same path checks to direct file edits. Work as a normal user, not with
 - Verify with `tatr find <id>` and a narrow query in the correct status set. Inspect `git status --short` and `git diff -- tasks/` if using Git, and read new untracked task files (they are not shown in `git diff`); don't stage/commit, delete tasks, or discard unrelated changes unless asked.
 - Finish with the task IDs/paths changed, status, validation performed, and anything needing human action.
 
-With project-local Neovim setup, the human can use `:Tasks`, `:Tasks :bug`, or `:Tasks -c`; `:Tasks new [-t tag] Title...` creates a task and refreshes the list; Enter opens a task, and `:Tasks explore` or `<leader>td` browses its folder after opening `TASK.md` (netrw or oil.nvim). The command and mappings are registered only when `tatr` is executable. They remain active for the session, so use one Neovim instance per project.
+With project-local Neovim setup, the human can use `:Tasks`, `:Tasks :bug`, or `:Tasks -c`; `:Tasks new [-t tag] Title...` creates a task and refreshes the list with the previous filters; Enter opens a task, and `:Tasks explore` or `<leader>td` opens that task's folder in a new window above (netrw's `:Explore` or oil.nvim; from the task list it follows the entry under the cursor, and outside a task it reports a failure instead of opening a folder). The command and mappings are registered only when `tatr` is executable. They remain active for the session, so use one Neovim instance per project.
 
 Alternatively, for a manual Vim/Neovim session (`tatr` on PATH):
 
