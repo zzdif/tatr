@@ -2,7 +2,7 @@
 
 - STATUS: OPEN
 - PRIORITY: 100
-- TAGS:
+- TAGS: spec
 
 Cephon wanted to kanban this whole thing. I guess we could've just
 treated any not "CLOSED" status as opened and let the user put

@@ -269,6 +269,7 @@ NOBDEF bool nob_read_entire_dir(const char *parent, Nob_File_Paths *children);
 NOBDEF bool nob_write_entire_file(const char *path, const void *data, size_t size);
 NOBDEF Nob_File_Type nob_get_file_type(const char *path);
 NOBDEF bool nob_delete_file(const char *path);
+NOBDEF bool nob_delete_directory_recursively(const char *dir_path);
 
 typedef enum {
     // If the current file is a directory go inside of it.
@@ -458,6 +459,9 @@ NOBDEF void nob_sb_pad_align(Nob_String_Builder *sb, size_t size);
 
 // Append a string view to a string builder
 #define nob_sb_append_sv(sb, sv) nob_sb_append_buf((sb), (sv).data, (sv).count)
+
+// Append another string builder to the string builder
+NOBDEF void nob_sb_append_sb(Nob_String_Builder *dst, Nob_String_Builder src);
 
 // Append a NULL-terminated string to a string builder
 #define nob_sb_append_cstr(sb, cstr)  \
@@ -948,6 +952,10 @@ NOBDEF Nob_String_View nob_sv_from_cstr(const char *cstr);
 NOBDEF Nob_String_View nob_sv_from_parts(const char *data, size_t count);
 // nob_sb_to_sv() enables you to just view Nob_String_Builder as Nob_String_View
 #define nob_sb_to_sv(sb) nob_sv_from_parts((sb).items, (sb).count)
+// nob_sv_find() finds an the index at which `needle` starts in `haystack`
+// as a substring. If the `haystack` doesn't contain `needle` as the substring
+// returns -1. Uses naive O(NM) algorithm right now.
+NOBDEF int nob_sv_find(Nob_String_View haystack, Nob_String_View needle);
 
 #define NOB_SVLIT(lit) (NOB_CLIT(Nob_String_View){.count = sizeof(lit)-1, .data = (lit)})
 // Generally majority of the C/C++ compilers will allow you to use NOB_SVLIT to construct global variables.
@@ -955,7 +963,15 @@ NOBDEF Nob_String_View nob_sv_from_parts(const char *data, size_t count);
 // For such compilers use NOB_SVLIT_STATIC instead.
 #define NOB_SVLIT_STATIC(lit) {.count = sizeof(lit)-1, .data = (lit)}
 
+#define NOB_SVNULL ((Nob_String_View){0})
+
+#define NOB_SB_Fmt2 NOB_SV_Fmt2
+#define NOB_SB_Arg(sb) (int) (sb).count, (sb).items
+
 // printf macros for String_View
+#ifndef NOB_SV_Fmt2
+#define NOB_SV_Fmt2 ".*s"
+#endif // NOB_SV_Fmt2
 #ifndef SV_Fmt
 #define SV_Fmt "%.*s"
 #endif // SV_Fmt
@@ -1622,7 +1638,7 @@ static Nob_Proc nob__cmd_start_process(Nob_Cmd cmd, Nob_Fd *fdin, Nob_Fd *fdout,
             nob_log(NOB_ERROR, "Could not exec child process for %s: %s", cmd.items[0], strerror(errno));
             exit(1);
         }
-        NOB_UNREACHABLE("nob_cmd_run_async_redirect");
+        NOB_UNREACHABLE("nob__cmd_start_process");
     }
 
     return cpid;
@@ -2318,6 +2334,16 @@ NOBDEF bool nob_delete_file(const char *path)
 #endif // _WIN32
 }
 
+static bool nob__delete_walk_entry(Nob_Walk_Entry entry)
+{
+    return nob_delete_file(entry.path);
+}
+
+NOBDEF bool nob_delete_directory_recursively(const char *dir_path)
+{
+    return nob_walk_dir(dir_path, nob__delete_walk_entry, .post_order = true);
+}
+
 NOBDEF bool nob_copy_directory_recursively(const char *src_path, const char *dst_path)
 {
     bool result = true;
@@ -2636,6 +2662,11 @@ NOBDEF void nob_sb_pad_align(Nob_String_Builder *sb, size_t size)
     }
 }
 
+NOBDEF void nob_sb_append_sb(Nob_String_Builder *dst, Nob_String_Builder src)
+{
+    nob_sb_append_sv(dst, nob_sb_to_sv(src));
+}
+
 NOBDEF Nob_String_View nob_sv_chop_while(Nob_String_View *sv, int (*p)(int x))
 {
     size_t i = 0;
@@ -2721,6 +2752,18 @@ NOBDEF Nob_String_View nob_sv_from_parts(const char *data, size_t count)
     sv.count = count;
     sv.data = data;
     return sv;
+}
+
+NOBDEF int nob_sv_find(Nob_String_View haystack, Nob_String_View needle)
+{
+    // TODO: Use something better in here. Something like a Rolling Hash.
+    for (size_t i = 0; needle.count <= haystack.count; ++i) {
+        if (nob_sv_starts_with(haystack, needle)) {
+            return (int)i;
+        }
+        nob_sv_chop_left(&haystack, 1);
+    }
+    return -1;
 }
 
 NOBDEF Nob_String_View nob_sv_trim_left(Nob_String_View sv)
@@ -3013,6 +3056,7 @@ NOBDEF char *nob_temp_running_executable_path(void)
         #define write_entire_file nob_write_entire_file
         #define get_file_type nob_get_file_type
         #define delete_file nob_delete_file
+        #define delete_directory_recursively nob_delete_directory_recursively
         #define Dir_Entry Nob_Dir_Entry
         #define dir_entry_open nob_dir_entry_open
         #define dir_entry_next nob_dir_entry_next
@@ -3038,6 +3082,7 @@ NOBDEF char *nob_temp_running_executable_path(void)
         #define sb_appendf nob_sb_appendf
         #define sb_append_buf nob_sb_append_buf
         #define sb_append_sv nob_sb_append_sv
+        #define sb_append_sb nob_sb_append_sb
         #define sb_append_cstr nob_sb_append_cstr
         #define sb_append_null nob_sb_append_null
         #define sb_append nob_sb_append
@@ -3124,8 +3169,13 @@ NOBDEF char *nob_temp_running_executable_path(void)
         #define sv_ends_with_cstr nob_sv_ends_with_cstr
         #define sv_from_cstr nob_sv_from_cstr
         #define sv_from_parts nob_sv_from_parts
+        #define sv_find nob_sv_find
         #define sv_utf8_len nob_sv_utf8_len
         #define bytes_for_utf8 nob_bytes_for_utf8
+        #define SVNULL NOB_SVNULL
+        #define SB_Fmt2 NOB_SB_Fmt2
+        #define SB_Arg NOB_SB_Arg
+        #define SV_Fmt2 NOB_SV_Fmt2
         #define sb_to_sv nob_sb_to_sv
         #define win32_error_message nob_win32_error_message
         #define nprocs nob_nprocs
@@ -3137,7 +3187,12 @@ NOBDEF char *nob_temp_running_executable_path(void)
 /*
    Revision history:
 
-    3.11.0+ (          ) Introduce NOB_OVERWRITE_TEMP_ON_REWIND (by @rexim)
+    3.11.0+ (          ) Add NOB_OVERWRITE_TEMP_ON_REWIND (by @rexim)
+                         Add NOB_SV_Fmt2, NOB_SVNULL (by @rexim)
+                         Add NOB_SB_Fmt2, NOB_SB_Arg (by @rexim)
+                         Add nob_delete_directory_recursively() (by @rexim)
+                         Add nob_sv_find() (by @rexim)
+                         Add nob_sb_append_sb() (by @rexim)
      3.10.0 (2026-07-17) Make NOB_SVLIT a bit more usable at compile-time (by @Arhcout)
                          Add NOB_SVLIT_STATIC for when a compiler simply refuses to accept NOB_SVLIT() at compile-time (looking at you `cl.exe /TC`) (by @rexim)
       3.9.0 (2026-07-15) Add NOB_TODOF() and NOB_UNREACHABLEF()
@@ -3350,6 +3405,7 @@ NOBDEF char *nob_temp_running_executable_path(void)
         without really modifying any existing functionality.
       - Breaking backward compatibility in a MINOR release should be considered a bug and
         should be promptly fixed in the next PATCH release.
+      - `+` in front of the version means means unstable version currently in development.
 
    API conventions:
 

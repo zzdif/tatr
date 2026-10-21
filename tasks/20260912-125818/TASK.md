@@ -1,8 +1,8 @@
 # Implement `tatr-tag`
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
-- TAGS: scope
+- TAGS:
 
 Extracted from 20260828-211200.
 

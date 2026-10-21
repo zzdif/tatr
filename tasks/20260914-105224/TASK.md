@@ -2,7 +2,7 @@
 
 - STATUS: OPEN
 - PRIORITY: 80
-- TAGS: scope
+- TAGS:
 
 Interesting use case:
 

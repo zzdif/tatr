@@ -2,7 +2,7 @@
 
 - STATUS: OPEN
 - PRIORITY: 10
-- TAGS: bug
+- TAGS: bug,spec
 
 This is more of a bug of the spec of the task database. All the info
 about the issue is store in a file named "TASK.md". In a text editor

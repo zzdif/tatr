@@ -17,6 +17,7 @@
 #include "./thirdparty/nob.h"
 #define FLAG_IMPLEMENTATION
 #include "./thirdparty/flag.h"
+#include "./src/huid.h"
 
 #define BUILD_FOLDER      "build/"
 #define SRC_FOLDER        "src/"
@@ -56,21 +57,17 @@ typedef struct {
     bool ok;
 } Test_Runner;
 
-bool run_query_payload(Test_Runner *r, const char *query_payload)
+bool test_runner_run(Test_Runner *r)
 {
     const char *test_stdout_path = BUILD_FOLDER"test_stdout.txt";
     const char *test_stderr_path = BUILD_FOLDER"test_stderr.txt";
-    cmd_append(&r->cmd, BUILD_FOLDER"tatr");
-    cmd_append(&r->cmd, "ls");
-    cmd_append(&r->cmd, "-debug");
-    cmd_append(&r->cmd, query_payload);
     Log_Handler *saved_log_handler = get_log_handler();
     set_log_handler(null_log_handler);
     {
         r->ok = cmd_run(
             &r->cmd,
             .stdout_path = test_stdout_path,
-            .stderr_path = test_stderr_path
+            .stderr_path = test_stderr_path,
         );
     }
     set_log_handler(saved_log_handler);
@@ -78,6 +75,16 @@ bool run_query_payload(Test_Runner *r, const char *query_payload)
     if (!read_entire_file(test_stdout_path, &r->sb_stdout)) return false;
     r->sb_stderr.count = 0;
     if (!read_entire_file(test_stderr_path, &r->sb_stderr)) return false;
+    return true;
+}
+
+bool run_query_payload(Test_Runner *r, const char *query_payload)
+{
+    cmd_append(&r->cmd, BUILD_FOLDER"tatr");
+    cmd_append(&r->cmd, "ls");
+    cmd_append(&r->cmd, "-debug");
+    cmd_append(&r->cmd, query_payload);
+    if (!test_runner_run(r)) return false;
     return true;
 }
 
@@ -111,10 +118,12 @@ bool expect_success(Test_Runner *r)
     return true;
 }
 
-bool assert_test_output(const char *output_label, String_View expected_stdout, String_View actual_stdout)
+#define assert_test_output(output_label, expected_stdout, actual_stdout) \
+    assert_test_output_loc(__FILE__, __LINE__, output_label, expected_stdout, actual_stdout)
+bool assert_test_output_loc(const char *file_loc, int line_loc, const char *output_label, String_View expected_stdout, String_View actual_stdout)
 {
     if (!sv_eq(expected_stdout, actual_stdout)) {
-        nob_log(ERROR, "UNEXPECTED %s !!!", output_label);
+        nob_log(ERROR, "%s:%d: UNEXPECTED %s !!!", file_loc, line_loc, output_label);
         nob_log(ERROR, "EXPECTED:");
         fprintf(stderr, SV_Fmt"\n", SV_Arg(expected_stdout));
         nob_log(ERROR, "ACTUAL:");
@@ -132,7 +141,7 @@ bool test_ls_query_negation_of_complex_expression_in_parens(Test_Runner *r)
     if (!assert_test_output(
         "STDOUT",
         sv_from_cstr(
-            "TOKENS:\n"
+            "QUERY TOKENS:\n"
             "    not\n"
             "    [\n"
             "    tagged\n"
@@ -146,17 +155,17 @@ bool test_ls_query_negation_of_complex_expression_in_parens(Test_Runner *r)
             "    :bar\n"
             "    ]\n"
             "\n"
-            "OPS:\n"
-            "    OP_TAGGED\n"
-            "    OP_TAG bug\n"
-            "    OP_TAG test\n"
-            "    OP_AND\n"
-            "    OP_TAG foo\n"
-            "    OP_AND\n"
-            "    OP_TAG bar\n"
-            "    OP_AND\n"
-            "    OP_OR\n"
-            "    OP_NOT\n"),
+            "QUERY OPS:\n"
+            "    QOP_TAGGED\n"
+            "    QOP_TAG bug\n"
+            "    QOP_TAG test\n"
+            "    QOP_AND\n"
+            "    QOP_TAG foo\n"
+            "    QOP_AND\n"
+            "    QOP_TAG bar\n"
+            "    QOP_AND\n"
+            "    QOP_OR\n"
+            "    QOP_NOT\n"),
         sb_to_sv(r->sb_stdout))) return false;
     if (!assert_test_output("STDERR", (String_View){0}, sb_to_sv(r->sb_stderr))) return false;
     nob_log(INFO, "OK");
@@ -171,7 +180,7 @@ bool test_ls_query_not_stuck_to_open_paren(Test_Runner *r)
     if (!assert_test_output(
         "STDOUT",
         sv_from_cstr(
-            "TOKENS:\n"
+            "QUERY TOKENS:\n"
             "    not\n"
             "    [\n"
             "    :bug\n"
@@ -181,13 +190,13 @@ bool test_ls_query_not_stuck_to_open_paren(Test_Runner *r)
             "    and\n"
             "    :query\n"
             "\n"
-            "OPS:\n"
-            "    OP_TAG bug\n"
-            "    OP_TAG test\n"
-            "    OP_AND\n"
-            "    OP_NOT\n"
-            "    OP_TAG query\n"
-            "    OP_AND\n"),
+            "QUERY OPS:\n"
+            "    QOP_TAG bug\n"
+            "    QOP_TAG test\n"
+            "    QOP_AND\n"
+            "    QOP_NOT\n"
+            "    QOP_TAG query\n"
+            "    QOP_AND\n"),
         sb_to_sv(r->sb_stdout))) return false;
     if (!assert_test_output("STDERR", (String_View){0}, sb_to_sv(r->sb_stderr))) return false;
     nob_log(INFO, "OK");
@@ -225,15 +234,15 @@ bool test_ls_query_priority_above_20(Test_Runner *r)
     if (!assert_test_output(
         "STDOUT",
         SVLIT(
-            "TOKENS:\n"
+            "QUERY TOKENS:\n"
             "    priority\n"
             "    gt\n"
             "    20\n"
             "\n"
-            "OPS:\n"
-            "    OP_PRIORITY\n"
-            "    OP_INTEGER 20\n"
-            "    OP_GT\n"),
+            "QUERY OPS:\n"
+            "    QOP_PRIORITY\n"
+            "    QOP_INTEGER 20\n"
+            "    QOP_GT\n"),
         sb_to_sv(r->sb_stdout))) return false;
     if (!assert_test_output(
         "STDERR",
@@ -267,43 +276,15 @@ void cc(Cmd *cmd, Compiler compiler)
     cmd_append(cmd, "-ggdb");
 }
 
-const char *get_current_date(void)
-{
-    static const char *WEEKDAYS[] = {
-        "Sun", "Mon", "Tue",
-        "Wed", "Thu", "Fri",
-        "Sat",
-    };
-
-    static const char *MONTHS[] = {
-        "Jan", "Feb", "Mar",
-        "Apr", "May", "Jun",
-        "Jul", "Aug", "Sep",
-        "Oct", "Nov", "Dec",
-    };
-
-    time_t rawtime;
-    time(&rawtime);
-    struct tm *timeinfo = localtime(&rawtime);
-
-    String_Builder sb = {0};
-    sb_appendf(&sb, "%s, ",  ARRAY_GET(WEEKDAYS, timeinfo->tm_wday));
-    sb_appendf(&sb, "%02d ", timeinfo->tm_mday);
-    sb_appendf(&sb, "%s ",   ARRAY_GET(MONTHS, timeinfo->tm_mon));
-    sb_appendf(&sb, "%04d ", timeinfo->tm_year+1900);
-    sb_appendf(&sb, "%02d:", timeinfo->tm_hour);
-    sb_appendf(&sb, "%02d:", timeinfo->tm_min);
-    sb_appendf(&sb, "%02d ", timeinfo->tm_sec);
-    sb_appendf(&sb, "%s",    timeinfo->tm_zone);
-    sb_append_null(&sb);
-    return sb.items;
-}
-
 bool make_build_h(Compiler compiler);
+const char *get_current_date(void);
+bool test_tatr_new_sanity(Cmd *cmd);
+bool test_tatr_todo_sanity(Cmd *cmd);
+bool test_tatr_tag_task_without_tags_property(const char *file_loc, int line_loc, Cmd *cmd);
 
 int main(int argc, char **argv)
 {
-    GO_REBUILD_URSELF(argc, argv);
+    GO_REBUILD_URSELF_PLUS(argc, argv, "./src/huid.h", "./src/huid.c", "./thirdparty/nob.h", "./thirdparty/flag.h");
     Cmd cmd = {0};
 
     bool test = false;
@@ -367,6 +348,9 @@ int main(int argc, char **argv)
         if (!test_ls_query_not_stuck_to_open_paren(&r)) return 1;
         if (!test_ls_query_report_error_utf8(&r)) return 1;
         if (!test_ls_query_priority_above_20(&r)) return 1;
+        if (!test_tatr_new_sanity(&r.cmd)) return 1;
+        if (!test_tatr_todo_sanity(&r.cmd)) return 1;
+        if (!test_tatr_tag_task_without_tags_property(__FILE__, __LINE__, &r.cmd)) return 1;
 
         cmd_append(&cmd, "sh", "tests/setup.sh", BUILD_FOLDER"tatr");
         if (!cmd_run(&cmd)) return 1;
@@ -395,30 +379,247 @@ bool embed_file(String_Builder *output, const char *path, const char *name)
     return true;
 }
 
-bool make_build_h(Compiler compiler)
+void sv_quote(String_View sv, String_Builder *quoted_sb)
 {
-    Cmd cmd = {0};
-    String_Builder sb_build_h = {0};
-    sb_appendf(&sb_build_h, "#ifndef BUILD_H_\n");
-    sb_appendf(&sb_build_h, "#define BUILD_H_\n");
+    da_foreach (const char, x, &sv) {
+        switch (*x) {
+        case '\n': sb_appendf(quoted_sb, "\\n");  break;
+        case '"':  sb_appendf(quoted_sb, "\\\""); break;
+        case '\\': sb_appendf(quoted_sb, "\\\\"); break;
+        default:   sb_append (quoted_sb, *x);     break;
+        }
+    }
+}
 
-    // TASK(20260901-051445): If git state is dirty the baked git hash should indicate that
+size_t count_needles(String_View haystack, String_View needle)
+{
+    int index = sv_find(haystack, needle);
+    size_t count = 0;
+    while (index >= 0) {
+        count += 1;
+        haystack.data  += index + needle.count;
+        haystack.count -= index + needle.count;
+        index = sv_find(haystack, needle);
+    }
+    return count;
+}
+
+bool count_needles_in_file(const char *file_path, String_View needle, size_t *needle_count)
+{
+    bool result = true;
+    String_Builder sb = {0};
+    if (!read_entire_file(file_path, &sb)) return_defer(false);
+    *needle_count = count_needles(sb_to_sv(sb), needle);
+defer:
+    free(sb.items);
+    return result;
+}
+
+bool expect_needle_count_in_file(const char *file_loc, int line_loc, const char *file_path, String_View needle, size_t expected_needle_count)
+{
+    String_Builder sb = {0};
+    bool result = true;
+    size_t needle_count = 0;
+    if (!count_needles_in_file(file_path, needle, &needle_count)) return_defer(false);
+    if (needle_count != expected_needle_count) {
+        sv_quote(needle, &sb);
+        String_View quoted_needle = sb_to_sv(sb);
+        fprintf(stderr, "%s:%d: Expected %zu \""SV_Fmt"\" in %s but got %zu\n", file_loc, line_loc, expected_needle_count, SV_Arg(quoted_needle), file_path, needle_count);
+        return_defer(false);
+    }
+defer:
+    free(sb.items);
+    return result;
+}
+
+bool count_newlines_in_file(const char *file_path, size_t *newline_count)
+{
+    return count_needles_in_file(file_path, SVLIT("\n"), newline_count);
+}
+
+bool expect_newline_count_in_file(const char *file_loc, int line_loc, const char *file_path, size_t expected_newline_count)
+{
+    return expect_needle_count_in_file(file_loc, line_loc, file_path, SVLIT("\n"),  expected_newline_count);
+}
+
+bool test_tatr_tag_task_without_tags_property(const char *file_loc, int line_loc, Cmd *cmd)
+{
+    bool result = true;
+    const char *saved_cwd = get_current_dir_temp();
+    String_Builder sb = {0};
+    size_t newlines = 0;
+
+    if (file_exists(BUILD_FOLDER"test/")) {
+        if (!delete_directory_recursively(BUILD_FOLDER"test/")) return_defer(false);
+    }
+
+    if (!mkdir_if_not_exists(BUILD_FOLDER"test/")) return_defer(false);
+
+    set_current_dir(BUILD_FOLDER"test/");
+
+    cmd_append(cmd, "../tatr", "init");
+    if (!cmd_run(cmd, .stdout_path = "stdout.txt")) return_defer(false);
+
+    const char *task_id = temp_new_huid(NULL);
+    if (!mkdir_if_not_exists(temp_sprintf("tasks/%s", task_id))) return_defer(false);
+    const char *task_md_path = temp_sprintf("tasks/%s/TASK.md", task_id);
+
+    sb_appendf(&sb, "# Test\n");
+    sb_appendf(&sb, "\n");
+    sb_appendf(&sb, "- PRIORITY: 69\n");
+    sb_appendf(&sb, "- STATUS: OPEN\n");
+    sb_appendf(&sb, "\n");
+    sb_appendf(&sb, "A task without TAGS property\n");
+    if (!write_entire_file(task_md_path, sb.items, sb.count)) return_defer(false);
+
+    cmd_append(cmd, "../tatr", "ls", "-update", "+aboba", "any");
+    if (!cmd_run(cmd, .stdout_path = "stdout.txt")) return_defer(false);
+
+    if (!expect_needle_count_in_file(__FILE__, __LINE__, task_md_path, SVLIT("aboba"), 1)) return_defer(false);
+
+defer:
+    set_current_dir(saved_cwd);
+    free(sb.items);
+    if (!result) {
+        fprintf(stderr, "%s:%d: TEST FAILED\n", file_loc, line_loc);
+    }
+    return result;
+}
+
+bool test_tatr_todo_sanity(Cmd *cmd)
+{
+    bool result = true;
+    const char *saved_cwd = get_current_dir_temp();
+    String_Builder sb = {0};
+    size_t newlines = 0;
+
+    if (file_exists(BUILD_FOLDER"test/")) {
+        if (!delete_directory_recursively(BUILD_FOLDER"test/")) return_defer(false);
+    }
+
+    if (!mkdir_if_not_exists(BUILD_FOLDER"test/")) return_defer(false);
+
+    set_current_dir(BUILD_FOLDER"test/");
+
+    cmd_append(cmd, "../tatr", "init");
+    if (!cmd_run(cmd, .stdout_path = "stdout.txt")) return_defer(false);
+
+    cmd_append(cmd, "../tatr", "ls", "-id");
+    if (!cmd_run(cmd, .stdout_path = "stdout.txt")) return_defer(false);
+    if (!expect_newline_count_in_file(__FILE__, __LINE__, "stdout.txt", 1)) return_defer(false);
+
+    sb.count = 0;
+    sb_appendf(&sb, "y\n");
+    sb_appendf(&sb, "n\n");
+    sb_appendf(&sb, "y\n");
+    if (!write_entire_file("stdin.txt", sb.items, sb.count)) return_defer(false);
+
+    sb.count = 0;
+    sb_appendf(&sb, "// TODO: task 1\n");
+    sb_appendf(&sb, "/* TODO: task 2\n");
+    sb_appendf(&sb, "*/\n");
+    sb_appendf(&sb, "# TODO: task 3\n");
+    if (!write_entire_file("todos", sb.items, sb.count)) return_defer(false);
+
+    cmd_append(cmd, "../tatr", "todo", "./todos");
+    if (!cmd_run(cmd, .stdin_path = "stdin.txt", .stdout_path = "stdout.txt")) return_defer(false);
+    if (!expect_needle_count_in_file(__FILE__, __LINE__, "./todos", SVLIT("\n"),   4)) return_defer(false);
+    if (!expect_needle_count_in_file(__FILE__, __LINE__, "./todos", SVLIT("TODO"), 1)) return_defer(false);
+    if (!expect_needle_count_in_file(__FILE__, __LINE__, "./todos", SVLIT("TASK"), 2)) return_defer(false);
+
+    cmd_append(cmd, "../tatr", "ls", "-id");
+    if (!cmd_run(cmd, .stdout_path = "stdout.txt")) return_defer(false);
+    if (!expect_newline_count_in_file(__FILE__, __LINE__, "stdout.txt", 2)) return_defer(false);
+
+defer:
+    set_current_dir(saved_cwd);
+    free(sb.items);
+    return result;
+}
+
+bool test_tatr_new_sanity(Cmd *cmd)
+{
+    bool result = true;
+    const char *saved_cwd = get_current_dir_temp();
+
+    if (file_exists(BUILD_FOLDER"test/")) {
+        if (!delete_directory_recursively(BUILD_FOLDER"test/")) return_defer(false);
+    }
+
+    if (!mkdir_if_not_exists(BUILD_FOLDER"test/")) return_defer(false);
+
+    set_current_dir(BUILD_FOLDER"test/");
+
+    cmd_append(cmd, "../tatr", "init");
+    if (!cmd_run(cmd, .stdout_path = "stdout.txt")) return_defer(false);
+
+    cmd_append(cmd, "../tatr", "new");
+    cmd_append(cmd, "-p", "69");
+    cmd_append(cmd, "-t", "foo,bar,baz");
+    cmd_append(cmd, "Sanity check task");
+    if (!cmd_run(cmd, .stdout_path = "stdout.txt")) return_defer(false);
+
+defer:
+    set_current_dir(saved_cwd);
+    return result;
+}
+
+bool append_git_hash_to_build_h(String_Builder *sb_build_h)
+{
+    bool result = true;
+
+    Cmd cmd = {0};
+    String_Builder git_status_sb = {0};
+
+    cmd_append(&cmd, "git");
+    cmd_append(&cmd, "status");
+    cmd_append(&cmd, "--porcelain");
+    if (!cmd_run(&cmd, .stdout_path = BUILD_FOLDER"git_status.txt")) {
+        nob_log(WARNING, "git hash will not be included in `tatr-version`");
+        return_defer(true);
+    }
+
+    if (!read_entire_file(BUILD_FOLDER"git_status.txt", &git_status_sb)) return_defer(false);
+    String_View git_status_sv = sv_trim(sb_to_sv(git_status_sb));
+
     cmd_append(&cmd, "git");
     cmd_append(&cmd, "rev-parse");
     cmd_append(&cmd, "--short");
     cmd_append(&cmd, "HEAD");
-    if (cmd_run(&cmd, .stdout_path = BUILD_FOLDER"git_hash.txt")) {
-        sb_appendf(&sb_build_h, "#define GIT_HASH \"");
-        if (!read_entire_file(BUILD_FOLDER"git_hash.txt", &sb_build_h)) return false;
-        while (sb_build_h.count > 0 && isspace(da_last(&sb_build_h))) {
-            UNUSED(da_pop(&sb_build_h));
-        }
-        sb_appendf(&sb_build_h, "\"\n");
-    } else {
+    if (!cmd_run(&cmd, .stdout_path = BUILD_FOLDER"git_hash.txt")) {
         nob_log(WARNING, "git hash will not be included in `tatr-version`");
+        return_defer(true);
     }
 
+    sb_appendf(sb_build_h, "#define GIT_HASH \"");
+    if (!read_entire_file(BUILD_FOLDER"git_hash.txt", sb_build_h)) return_defer(false);
+    while (sb_build_h->count > 0 && isspace(da_last(sb_build_h))) {
+        UNUSED(da_pop(sb_build_h));
+    }
+    if (git_status_sv.count > 0) {
+        sb_append(sb_build_h, '+');
+    }
+    sb_appendf(sb_build_h, "\"\n");
+
+defer:
+    free(cmd.items);
+    free(git_status_sb.items);
+    return result;
+}
+
+bool make_build_h(Compiler compiler)
+{
+    bool result = true;
+
+    Cmd cmd = {0};
+    String_Builder sb_build_h = {0};
     String_Builder sb_compiler_version_txt = {0};
+
+    sb_appendf(&sb_build_h, "#ifndef BUILD_H_\n");
+    sb_appendf(&sb_build_h, "#define BUILD_H_\n");
+
+    if (!append_git_hash_to_build_h(&sb_build_h)) return_defer(false);
+
     static_assert(__compiler_count == 4, "Amount of compilers have changed");
     switch (compiler) {
     case CC:    cmd_append(&cmd, "cc",    "--version"); break;
@@ -430,7 +631,7 @@ bool make_build_h(Compiler compiler)
         UNREACHABLE("Compiler");
     }
     if (cmd_run(&cmd, .stdout_path = BUILD_FOLDER"compiler-version.txt")) {
-        if (!read_entire_file(BUILD_FOLDER"compiler-version.txt", &sb_compiler_version_txt)) return false;
+        if (!read_entire_file(BUILD_FOLDER"compiler-version.txt", &sb_compiler_version_txt)) return_defer(false);
         String_View compiler_version_txt = sb_to_sv(sb_compiler_version_txt);
         String_View compiler_version = sv_chop_by_delim(&compiler_version_txt, '\n');
         sb_appendf(&sb_build_h, "#define COMPILER_VERSION \""SV_Fmt"\"\n", SV_Arg(compiler_version));
@@ -442,18 +643,57 @@ bool make_build_h(Compiler compiler)
 
     const char *tasks_readme_md_file = "tasks/README.md";
     if (file_exists(tasks_readme_md_file)) {
-        if (!embed_file(&sb_build_h, tasks_readme_md_file, "tasks_readme_md")) return false;
+        if (!embed_file(&sb_build_h, tasks_readme_md_file, "tasks_readme_md")) return_defer(false);
         sb_appendf(&sb_build_h, "#define TASKS_README_MD tasks_readme_md\n");
     } else {
         nob_log(WARNING, "%s file doesn't exist. `tatr-init` will not create it along with the tasks/ folder", tasks_readme_md_file);
     }
 
-    if (!embed_file(&sb_build_h, "contrib/nvim/tatr.lua", "nvim_config")) return false;
-    if (!embed_file(&sb_build_h, "skills/tatr/SKILL.md", "agent_skill")) return false;
+    if (!embed_file(&sb_build_h, "contrib/nvim/tatr.lua", "nvim_config")) return_defer(false);
+    if (!embed_file(&sb_build_h, "skills/tatr/SKILL.md", "agent_skill")) return_defer(false);
 
     sb_appendf(&sb_build_h, "#endif // BUILD_H_\n");
 
-    if (!write_entire_file(BUILD_FOLDER"build.h", sb_build_h.items, sb_build_h.count)) return false;
+    if (!write_entire_file(BUILD_FOLDER"build.h", sb_build_h.items, sb_build_h.count)) return_defer(false);
     nob_log(INFO, "Generated "BUILD_FOLDER"build.h");
-    return true;
+
+defer:
+    free(cmd.items);
+    free(sb_build_h.items);
+    free(sb_compiler_version_txt.items);
+    return result;
 }
+
+const char *get_current_date(void)
+{
+    static const char *WEEKDAYS[] = {
+        "Sun", "Mon", "Tue",
+        "Wed", "Thu", "Fri",
+        "Sat",
+    };
+
+    static const char *MONTHS[] = {
+        "Jan", "Feb", "Mar",
+        "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep",
+        "Oct", "Nov", "Dec",
+    };
+
+    time_t rawtime;
+    time(&rawtime);
+    struct tm *timeinfo = localtime(&rawtime);
+
+    String_Builder sb = {0};
+    sb_appendf(&sb, "%s, ",  ARRAY_GET(WEEKDAYS, timeinfo->tm_wday));
+    sb_appendf(&sb, "%02d ", timeinfo->tm_mday);
+    sb_appendf(&sb, "%s ",   ARRAY_GET(MONTHS, timeinfo->tm_mon));
+    sb_appendf(&sb, "%04d ", timeinfo->tm_year+1900);
+    sb_appendf(&sb, "%02d:", timeinfo->tm_hour);
+    sb_appendf(&sb, "%02d:", timeinfo->tm_min);
+    sb_appendf(&sb, "%02d ", timeinfo->tm_sec);
+    sb_appendf(&sb, "%s",    timeinfo->tm_zone);
+    sb_append_null(&sb);
+    return sb.items;
+}
+
+#include "./src/huid.c"

@@ -41,16 +41,16 @@ bool setup_run(Command *self, const char *program_name, int argc, char **argv)
     void *c = flag_c_new(program_name);
     flag_c_bool_var(c, &help, "help", false, "Print this help message");
     if (!flag_c_parse(c, argc, argv)) {
-        print_command_usage(self, program_name, c);
+        print_command_usage(stderr, self, program_name, c);
         flag_c_print_error(c, stderr);
         return false;
     }
     if (help) {
-        print_command_usage(self, program_name, c);
+        print_command_usage(stdout, self, program_name, c);
         return true;
     }
     if (flag_c_rest_argc(c) != 0) {
-        print_command_usage(self, program_name, c);
+        print_command_usage(stderr, self, program_name, c);
         nob_log(ERROR, "Run %s from the target project root; no positional arguments are accepted", self->name);
         return false;
     }

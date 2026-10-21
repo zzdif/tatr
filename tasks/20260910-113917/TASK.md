@@ -1,6 +1,6 @@
 # Not sure why we use nob_log for reporting useful info to the user
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS:
 

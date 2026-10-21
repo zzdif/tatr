@@ -15,49 +15,49 @@
 #include "task.h"
 #include "ht.h"
 
-bool tags_contains(Tags tags, String_View tag)
+bool parsed_tags_contains(Parsed_Tags parsed_tags, String_View tag)
 {
-    for (size_t i = 0; i < tags.count; ++i) {
-        if (sv_eq(tags.items[i], tag)) return true;
+    for (size_t i = 0; i < parsed_tags.count; ++i) {
+        if (sv_eq(parsed_tags.items[i], tag)) return true;
     }
     return false;
 }
 
-// TASK(20260913-063421): `append_task_md_content()` doesn't take into account `Task.body`
-void append_task_md_content(String_Builder *sb, Task task)
+void print_task_report(const char *rel_path, Task *task, String_View updated)
 {
-    sb_appendf(sb, "# "SV_Fmt"\n", SV_Arg(task.title));
-    sb_appendf(sb, "\n");
-    sb_appendf(sb, "- STATUS: "SV_Fmt"\n", SV_Arg(task.status));
-    sb_appendf(sb, "- PRIORITY: %d\n", task.priority);
-    sb_appendf(sb, "- TAGS:");
-    if (task.tags.count) {
-        sb_appendf(sb, " ");
-        for (size_t i = 0; i < task.tags.count; ++i) {
-            if (i > 0) sb_appendf(sb, ",");
-            sb_append_buf(sb, task.tags.items[i].data, task.tags.items[i].count);
-        }
-    }
-    sb_appendf(sb, "\n");
-    sb_appendf(sb, "\n");
-    sb_appendf(sb, "No description.\n");
-}
+    String_View status        = task->status;
+    int priority              = task->priority;
+    Parsed_Tags parsed_tags   = task->parsed_tags;
 
-void print_task_report(const char *rel_path, Task *task)
-{
+    String_Builder sb_unparsed_tags = {0};
+    unparse_tags(parsed_tags, &sb_unparsed_tags);
+    String_View unparsed_tags = sb_to_sv(sb_unparsed_tags);
+
     printf("%s/%s/TASK.md:1:", rel_path, task->id); // Location
-    printf(" "SV_Fmt, SV_Arg(task->status));        // Status
-    printf(" [PRIORITY: %3d]", task->priority);     // Priority
-    if (task->tags.count) {                         // Tags
-        printf(" [");
-        for (size_t i = 0; i < task->tags.count; ++i) {
-            if (i > 0) printf(",");
-            printf(SV_Fmt, SV_Arg(task->tags.items[i]));
-        }
-        printf("]");
+    if (updated.count) {
+        printf(" <UPDATED: "SV_Fmt">", SV_Arg(updated));
+    }
+    printf(" "SV_Fmt, SV_Arg(status));              // Status
+    printf(" [PRIORITY: %3d]", priority);           // Priority
+    if (!unparsed_tags_empty(unparsed_tags)) {      // Tags
+        printf(" ["SV_Fmt"]", SV_Arg(unparsed_tags));
     }
     printf(" "SV_Fmt, SV_Arg(task->title));         // Title
     printf("\n");
+}
+
+void print_task_tags_update_report(const char *rel_path, int tags_property_line, Task task, String_View old_unparsed_tags)
+{
+    String_Builder new_unparsed_tags = {0};
+    unparse_tags(task.parsed_tags, &new_unparsed_tags);
+
+    printf("%s/%s/TASK.md:%d:", rel_path, task.id, tags_property_line);                            // Location
+    printf(" "SV_Fmt, SV_Arg(task.status));                                                        // Status
+    printf(" [PRIORITY: %3d]", task.priority);                                                     // Priority
+    printf(" [%"SV_Fmt2"] -> [%"SB_Fmt2"]", SV_Arg(old_unparsed_tags), SB_Arg(new_unparsed_tags)); // Tags
+    printf(" "SV_Fmt, SV_Arg(task.title));                                                         // Title
+    printf("\n");
+
 }
 
 bool load_tasks(Tasks *tasks, const char *dir_path)
@@ -76,7 +76,7 @@ bool load_tasks(Tasks *tasks, const char *dir_path)
         File_Type type = get_file_type(task_path);
         if (type < 0) return_defer(false);
         if (type != FILE_DIRECTORY) {
-            nob_log(ERROR, "%s is not a directory", id);
+            fprintf(stderr, "ERROR: %s is not a directory\n", id);
             return_defer(false);
         }
         // This String_Builder becomes owned by Task.task_md_content.
@@ -91,30 +91,32 @@ bool load_tasks(Tasks *tasks, const char *dir_path)
         Task task = {
             .id = strdup(id),
             .task_md_content = sb_to_sv(sb_content),
+            .status = SVLIT("OPEN"), // Task is open until explicitly stated otherwise
+            .priority = 999999,      // Unset priority is super high so you don't forget to set it
         };
 
         task_md_parse(sb_content.items, &task.title, &task.properties, &task.body);
 
-        String_View *status_value = properties_get(&task.properties, SVLIT("STATUS"));
-        if (!status_value) {
-            // Task is open until explicitly stated otherwise
-            status_value = properties_put(&task.properties, SVLIT("STATUS"), SVLIT("OPEN"));
+        String_View *status = properties_get(&task.properties, SVLIT("STATUS"));
+        if (status) {
+            task.status = *status;
+        } else {
+            properties_put(&task.properties, SVLIT("STATUS"), SVNULL);
         }
-        task.status = *status_value;
 
-        String_View *priority_value = properties_get(&task.properties, SVLIT("PRIORITY"));
-        if (!priority_value) {
-            // Unset priority is super high so you don't forget to set it
-            priority_value = properties_put(&task.properties, SVLIT("PRIORITY"), SVLIT("999999"));
+        String_View *priority = properties_get(&task.properties, SVLIT("PRIORITY"));
+        if (priority) {
+            task.priority = atoi(temp_sv_to_cstr(*priority));
+        } else {
+            properties_put(&task.properties, SVLIT("PRIORITY"), SVNULL);
         }
-        task.priority = atoi(temp_sv_to_cstr(*priority_value));
 
-        String_View *tags_value = properties_get(&task.properties, SVLIT("TAGS"));
-        if (!tags_value) {
-            // No tags by default
-            tags_value = properties_put(&task.properties, SVLIT("TAGS"), SVLIT(""));
+        String_View *unparsed_tags = properties_get(&task.properties, SVLIT("TAGS"));
+        if (unparsed_tags) {
+            parse_tags(&task.parsed_tags, *unparsed_tags);
+        } else {
+            properties_put(&task.properties, SVLIT("TAGS"), SVNULL);
         }
-        parse_tags(&task.tags, *tags_value);
 
         da_append(tasks, task);
     }
@@ -149,30 +151,87 @@ Task_Compare task_sorter(bool by_id)
     return NULL;
 }
 
-bool task_matches_tags(const Task *task, const char **tags, size_t tags_count)
+bool unparsed_tags_next(String_View *unparsed_tags, String_View *tag)
 {
-    for (size_t j = 0; j < tags_count; ++j) {
-        if (!tags_contains(task->tags, sv_from_cstr(tags[j]))) {
-            return false;
-        }
+    while (unparsed_tags->count && (isspace(*unparsed_tags->data) || *unparsed_tags->data == ',')) {
+        sv_chop_left(unparsed_tags, 1);
     }
+    if (unparsed_tags->count == 0) {
+        *tag = sv_from_parts(unparsed_tags->data, 0);
+        return false;
+    }
+    const char *start = unparsed_tags->data;
+    while (unparsed_tags->count && !(isspace(*unparsed_tags->data) || *unparsed_tags->data == ',')) {
+        sv_chop_left(unparsed_tags, 1);
+    }
+    *tag = sv_from_parts(start, unparsed_tags->data - start);
     return true;
 }
 
-void parse_tags(Tags *tags, String_View sv)
+void parse_tags(Parsed_Tags *parsed_tags, String_View unparsed_tags)
 {
-    while (sv.count && (isspace(*sv.data) || *sv.data == ',')) {
-        sv_chop_left(&sv, 1);
+    String_View tag = {0};
+    while (unparsed_tags_next(&unparsed_tags, &tag)) {
+        da_append(parsed_tags, tag);
     }
-    while (sv.count > 0) {
-        const char *start = sv.data;
-        while (sv.count && !(isspace(*sv.data) || *sv.data == ',')) {
-            sv_chop_left(&sv, 1);
-        }
-        String_View tag = sv_from_parts(start, sv.data - start);
-        da_append(tags, tag);
-        while (sv.count && (isspace(*sv.data) || *sv.data == ',')) {
-            sv_chop_left(&sv, 1);
-        }
+}
+
+void unparse_tags(Parsed_Tags parsed_tags, String_Builder *unparsed_tags)
+{
+    for (size_t i = 0; i < parsed_tags.count; ++i) {
+        if (i > 0) sb_append_cstr(unparsed_tags, ",");
+        sb_append_sv(unparsed_tags, parsed_tags.items[i]);
     }
+}
+
+bool unparsed_tags_contains(String_View unparsed_tags, String_View tag)
+{
+    String_View current_tag = {0};
+    while (unparsed_tags_next(&unparsed_tags, &current_tag)) {
+        if (sv_eq(current_tag, tag)) return true;
+    }
+    return false;
+}
+
+bool unparsed_tags_empty(String_View unparsed_tags)
+{
+    String_View tag = {0};
+    if (unparsed_tags_next(&unparsed_tags, &tag)) return false;
+    return true;
+}
+
+void render_task_md(Task task, String_Builder *sb, int *tags_property_line)
+{
+    // The `Task.status`, `Task.priority`, and `Task.parsed_tags` have priority over whatever is in `Task.properties`.
+    // But the corresponding properties must at least exist there because they define the order in the rendered `TASK.md`
+    // file.
+    assert(properties_get(&task.properties, SVLIT("STATUS")));
+    assert(properties_get(&task.properties, SVLIT("TAGS")));
+    assert(properties_get(&task.properties, SVLIT("PRIORITY")));
+
+    int line = 1;
+    sb_appendf(sb, "# "SV_Fmt"\n", SV_Arg(task.title));
+    line += 1;
+    sb_appendf(sb, "\n");
+    line += 1;
+    da_foreach(Property, property, &task.properties) {
+        if (sv_eq(property->key, SVLIT("STATUS"))) {
+            sb_appendf(sb, "- STATUS: %"SV_Fmt2"\n", SV_Arg(task.status));
+        } else if (sv_eq(property->key, SVLIT("PRIORITY"))) {
+            sb_appendf(sb, "- PRIORITY: %d\n", task.priority);
+        } else if (sv_eq(property->key, SVLIT("TAGS"))) {
+            if (tags_property_line) *tags_property_line = line;
+            sb_append_cstr(sb, "- TAGS:");
+            if (task.parsed_tags.count) {
+                String_Builder unparsed_tags = {0};
+                unparse_tags(task.parsed_tags, &unparsed_tags);
+                sb_appendf(sb, " %"SB_Fmt2, SB_Arg(unparsed_tags));
+            }
+            sb_append(sb, '\n');
+        } else {
+            sb_appendf(sb, "- "SV_Fmt": "SV_Fmt"\n", SV_Arg(property->key), SV_Arg(property->value));
+        }
+        line += 1;
+    }
+    sb_appendf(sb, SV_Fmt, SV_Arg(task.body));
 }

@@ -14,8 +14,6 @@
 // with this program; if not, see <https://www.gnu.org/licenses/>.
 #include "query.h"
 
-void report_compile_query_diagnostic(String_View original_src, String_View src, const char *format, ...) NOB_PRINTF_FORMAT(3, 4);
-
 int is_bracket(int x)
 {
     if (x == '[') return true;
@@ -28,34 +26,41 @@ int is_not_bracket_nor_space(int x)
     return !is_bracket(x) && !isspace(x);
 }
 
-String_View chop_next_query_token(String_View *src)
+bool chop_next_query_token(String_View *src, String_View *token)
 {
     *src = sv_trim_left(*src);
-    if (src->count == 0) return *src;
-    if (sv_starts_with(*src, SVLIT("["))) return sv_chop_left(src, 1);
-    if (sv_starts_with(*src, SVLIT("]"))) return sv_chop_left(src, 1);
-    return sv_chop_while(src, is_not_bracket_nor_space);
+    if (src->count == 0) return false;
+    if (sv_starts_with(*src, SVLIT("["))) {
+        *token = sv_chop_left(src, 1);
+        return true;
+    }
+    if (sv_starts_with(*src, SVLIT("]"))) {
+        *token = sv_chop_left(src, 1);
+        return true;
+    }
+    *token = sv_chop_while(src, is_not_bracket_nor_space);
+    return token->count > 0;
 }
 
-void print_op(Op op)
+void print_qop(QOp op)
 {
     switch (op.kind) {
-    case OP_ANY:      printf("OP_ANY\n");                             break;
-    case OP_TAG:      printf("OP_TAG "SV_Fmt"\n", SV_Arg(op.as.tag)); break;
-    case OP_NOT:      printf("OP_NOT\n");                             break;
-    case OP_OR:       printf("OP_OR\n");                              break;
-    case OP_AND:      printf("OP_AND\n");                             break;
-    case OP_TAGGED:   printf("OP_TAGGED\n");                          break;
-    case OP_ID:       printf("OP_ID\n");                              break;
-    case OP_PRIORITY: printf("OP_PRIORITY\n");                        break;
-    case OP_INTEGER:  printf("OP_INTEGER %ld\n", op.as.integer);      break;
-    case OP_LT:       printf("OP_LT\n");                              break;
-    case OP_GT:       printf("OP_GT\n");                              break;
-    case OP_LTE:      printf("OP_LTE\n");                             break;
-    case OP_GTE:      printf("OP_GTE\n");                             break;
-    case OP_EQ:       printf("OP_EQ\n");                              break;
-    case OP_NEQ:      printf("OP_NEQ\n");                             break;
-    default: UNREACHABLE("Op_Kind");
+    case QOP_ANY:      printf("QOP_ANY\n");                             break;
+    case QOP_TAG:      printf("QOP_TAG "SV_Fmt"\n", SV_Arg(op.as.tag)); break;
+    case QOP_NOT:      printf("QOP_NOT\n");                             break;
+    case QOP_OR:       printf("QOP_OR\n");                              break;
+    case QOP_AND:      printf("QOP_AND\n");                             break;
+    case QOP_TAGGED:   printf("QOP_TAGGED\n");                          break;
+    case QOP_ID:       printf("QOP_ID\n");                              break;
+    case QOP_PRIORITY: printf("QOP_PRIORITY\n");                        break;
+    case QOP_INTEGER:  printf("QOP_INTEGER %ld\n", op.as.integer);      break;
+    case QOP_LT:       printf("QOP_LT\n");                              break;
+    case QOP_GT:       printf("QOP_GT\n");                              break;
+    case QOP_LTE:      printf("QOP_LTE\n");                             break;
+    case QOP_GTE:      printf("QOP_GTE\n");                             break;
+    case QOP_EQ:       printf("QOP_EQ\n");                              break;
+    case QOP_NEQ:      printf("QOP_NEQ\n");                             break;
+    default: UNREACHABLE("QOp_Kind");
     }
 }
 
@@ -69,90 +74,90 @@ bool pop_type(String_View original_src, Stack *stack, Type type, Stack_Item *ite
     return true;
 }
 
-Task_Match_Result task_matches_query(String_View original_src, const Task *task, Query query, Stack *stack)
+Query_Match_Result task_matches_query(String_View original_src, Task task, Query query, Stack *stack)
 {
     stack->count = 0;
-    da_foreach(Op, op, &query) {
+    da_foreach(QOp, op, &query) {
         switch (op->kind) {
-        case OP_ANY: {
+        case QOP_ANY: {
             da_append(stack, stack_bool(op->src, true));
         } break;
-        case OP_TAG: {
-            bool result = tags_contains(task->tags, op->as.tag);
+        case QOP_TAG: {
+            bool result = parsed_tags_contains(task.parsed_tags, op->as.tag);
             da_append(stack, stack_bool(op->src, result));
         } break;
-        case OP_NOT: {
+        case QOP_NOT: {
             Stack_Item item = {0};
-            if (!pop_type(original_src, stack, TYPE_BOOLEAN, &item)) return TMR_ERROR;
+            if (!pop_type(original_src, stack, TYPE_BOOLEAN, &item)) return QUERY_ERROR;
             da_append(stack, stack_bool(op->src, !item.as.boolean));
         } break;
-        case OP_OR: {
+        case QOP_OR: {
             Stack_Item a = {0};
             Stack_Item b = {0};
-            if (!pop_type(original_src, stack, TYPE_BOOLEAN, &a)) return TMR_ERROR;
-            if (!pop_type(original_src, stack, TYPE_BOOLEAN, &b)) return TMR_ERROR;
+            if (!pop_type(original_src, stack, TYPE_BOOLEAN, &a)) return QUERY_ERROR;
+            if (!pop_type(original_src, stack, TYPE_BOOLEAN, &b)) return QUERY_ERROR;
             da_append(stack, stack_bool(op->src, a.as.boolean || b.as.boolean));
         } break;
-        case OP_AND: {
+        case QOP_AND: {
             Stack_Item a = {0};
             Stack_Item b = {0};
-            if (!pop_type(original_src, stack, TYPE_BOOLEAN, &a)) return TMR_ERROR;
-            if (!pop_type(original_src, stack, TYPE_BOOLEAN, &b)) return TMR_ERROR;
+            if (!pop_type(original_src, stack, TYPE_BOOLEAN, &a)) return QUERY_ERROR;
+            if (!pop_type(original_src, stack, TYPE_BOOLEAN, &b)) return QUERY_ERROR;
             da_append(stack, stack_bool(op->src, a.as.boolean && b.as.boolean));
         } break;
-        case OP_ID: {
-            da_append(stack, stack_bool(op->src, sv_eq(sv_from_cstr(task->id), op->as.id)));
+        case QOP_ID: {
+            da_append(stack, stack_bool(op->src, sv_eq(sv_from_cstr(task.id), op->as.id)));
         } break;
-        case OP_TAGGED: {
-            da_append(stack, stack_bool(op->src, task->tags.count > 0));
+        case QOP_TAGGED: {
+            da_append(stack, stack_bool(op->src, task.parsed_tags.count > 0));
         } break;
-        case OP_PRIORITY: {
-            da_append(stack, stack_int(op->src, task->priority));
+        case QOP_PRIORITY: {
+            da_append(stack, stack_int(op->src, task.priority));
         } break;
-        case OP_INTEGER: {
+        case QOP_INTEGER: {
             da_append(stack, stack_int(op->src, op->as.integer));
         } break;
         // TASK(20260829-225753): All comparison operators could work with booleans too
-        case OP_LT: {
+        case QOP_LT: {
             Stack_Item a = {0};
             Stack_Item b = {0};
-            if (!pop_type(original_src, stack, TYPE_INTEGER, &b)) return TMR_ERROR;
-            if (!pop_type(original_src, stack, TYPE_INTEGER, &a)) return TMR_ERROR;
+            if (!pop_type(original_src, stack, TYPE_INTEGER, &b)) return QUERY_ERROR;
+            if (!pop_type(original_src, stack, TYPE_INTEGER, &a)) return QUERY_ERROR;
             da_append(stack, stack_bool(op->src, a.as.integer < b.as.integer));
         } break;
-        case OP_GT: {
+        case QOP_GT: {
             Stack_Item a = {0};
             Stack_Item b = {0};
-            if (!pop_type(original_src, stack, TYPE_INTEGER, &b)) return TMR_ERROR;
-            if (!pop_type(original_src, stack, TYPE_INTEGER, &a)) return TMR_ERROR;
+            if (!pop_type(original_src, stack, TYPE_INTEGER, &b)) return QUERY_ERROR;
+            if (!pop_type(original_src, stack, TYPE_INTEGER, &a)) return QUERY_ERROR;
             da_append(stack, stack_bool(op->src, a.as.integer > b.as.integer));
         } break;
-        case OP_LTE: {
+        case QOP_LTE: {
             Stack_Item a = {0};
             Stack_Item b = {0};
-            if (!pop_type(original_src, stack, TYPE_INTEGER, &b)) return TMR_ERROR;
-            if (!pop_type(original_src, stack, TYPE_INTEGER, &a)) return TMR_ERROR;
+            if (!pop_type(original_src, stack, TYPE_INTEGER, &b)) return QUERY_ERROR;
+            if (!pop_type(original_src, stack, TYPE_INTEGER, &a)) return QUERY_ERROR;
             da_append(stack, stack_bool(op->src, a.as.integer <= b.as.integer));
         } break;
-        case OP_GTE: {
+        case QOP_GTE: {
             Stack_Item a = {0};
             Stack_Item b = {0};
-            if (!pop_type(original_src, stack, TYPE_INTEGER, &b)) return TMR_ERROR;
-            if (!pop_type(original_src, stack, TYPE_INTEGER, &a)) return TMR_ERROR;
+            if (!pop_type(original_src, stack, TYPE_INTEGER, &b)) return QUERY_ERROR;
+            if (!pop_type(original_src, stack, TYPE_INTEGER, &a)) return QUERY_ERROR;
             da_append(stack, stack_bool(op->src, a.as.integer >= b.as.integer));
         } break;
-        case OP_EQ: {
+        case QOP_EQ: {
             Stack_Item a = {0};
             Stack_Item b = {0};
-            if (!pop_type(original_src, stack, TYPE_INTEGER, &b)) return TMR_ERROR;
-            if (!pop_type(original_src, stack, TYPE_INTEGER, &a)) return TMR_ERROR;
+            if (!pop_type(original_src, stack, TYPE_INTEGER, &b)) return QUERY_ERROR;
+            if (!pop_type(original_src, stack, TYPE_INTEGER, &a)) return QUERY_ERROR;
             da_append(stack, stack_bool(op->src, a.as.integer == b.as.integer));
         } break;
-        case OP_NEQ: {
+        case QOP_NEQ: {
             Stack_Item a = {0};
             Stack_Item b = {0};
-            if (!pop_type(original_src, stack, TYPE_INTEGER, &b)) return TMR_ERROR;
-            if (!pop_type(original_src, stack, TYPE_INTEGER, &a)) return TMR_ERROR;
+            if (!pop_type(original_src, stack, TYPE_INTEGER, &b)) return QUERY_ERROR;
+            if (!pop_type(original_src, stack, TYPE_INTEGER, &a)) return QUERY_ERROR;
             da_append(stack, stack_bool(op->src, a.as.integer != b.as.integer));
         } break;
         default: UNREACHABLE("Op_Kind");
@@ -160,12 +165,12 @@ Task_Match_Result task_matches_query(String_View original_src, const Task *task,
     }
     Stack_Item result = {0};
     if (!pop_type(original_src, stack, TYPE_BOOLEAN, &result)) {
-        return TMR_ERROR;
+        return QUERY_ERROR;
     }
     if (result.as.boolean) {
-        return TMR_MATCHED;
+        return QUERY_MATCHED;
     }
-    return TMR_MISMATCHED;
+    return QUERY_MISMATCHED;
 }
 
 void report_compile_query_diagnostic(String_View original_src, String_View src, const char *format, ...)
@@ -187,7 +192,8 @@ bool compile_query_expr(String_View original_src, String_View *src, Query *query
 
 bool compile_query_primary(String_View original_src, String_View *src, Query *query)
 {
-    String_View token = chop_next_query_token(src);
+    String_View token = {0};
+    chop_next_query_token(src, &token);
 
     // We used to use dot to refer to a tag before. We still accept it for backward compatibility.
     // But we may remove it at some point in the future.
@@ -200,14 +206,14 @@ bool compile_query_primary(String_View original_src, String_View *src, Query *qu
             return false;
         }
         sv_chop_left(&token, 1);
-        da_append(query, op_tag(token, token));
+        da_append(query, qop_tag(token, token));
         return true;
     }
 
     if (sv_eq(token, SVLIT("["))) {
         char start = *token.data;
         if (!compile_query_expr(original_src, src, query)) return false;
-        token = chop_next_query_token(src);
+        chop_next_query_token(src, &token);
         if (start == '[' && !sv_eq(token, SVLIT("]"))) {
             report_compile_query_diagnostic(original_src, token, "ERROR: Expected `]`.");
             return false;
@@ -217,27 +223,27 @@ bool compile_query_primary(String_View original_src, String_View *src, Query *qu
 
     if (sv_eq(token, SVLIT("not"))) {
         if (!compile_query_primary(original_src, src, query)) return false;
-        da_append(query, op_not(token));
+        da_append(query, qop_not(token));
         return true;
     }
 
     if (sv_eq(token, SVLIT("any"))) {
-        da_append(query, op_any(token));
+        da_append(query, qop_any(token));
         return true;
     }
 
     if (sv_eq(token, SVLIT("tagged"))) {
-        da_append(query, op_tagged(token));
+        da_append(query, qop_tagged(token));
         return true;
     }
 
     if (sv_eq(token, SVLIT("priority"))) {
-        da_append(query, op_priority(token));
+        da_append(query, qop_priority(token));
         return true;
     }
 
     if (is_valid_huid(temp_sv_to_cstr(token))) {
-        da_append(query, op_id(token, token));
+        da_append(query, qop_id(token, token));
         return true;
     }
 
@@ -248,7 +254,7 @@ bool compile_query_primary(String_View original_src, String_View *src, Query *qu
     bool ok           = nptr < endptr && *endptr == '\0';
     temp_rewind(checkpoint);
     if (ok) {
-        da_append(query, op_integer(token, integer));
+        da_append(query, qop_integer(token, integer));
         return true;
     }
 
@@ -277,35 +283,36 @@ bool compile_query_compare(String_View original_src, String_View *src, Query *qu
     if (!compile_query_primary(original_src, src, query)) return false;
     for (;;) {
         String_View saved_src = *src;
-        String_View token = chop_next_query_token(src);
+        String_View token = {0};
+        chop_next_query_token(src, &token);
         if (sv_eq(token, SVLIT("lt"))) {
             if (!compile_query_primary(original_src, src, query)) return false;
-            da_append(query, op_lt(token));
+            da_append(query, qop_lt(token));
             continue;
         }
         if (sv_eq(token, SVLIT("le"))) {
             if (!compile_query_primary(original_src, src, query)) return false;
-            da_append(query, op_lte(token));
+            da_append(query, qop_lte(token));
             continue;
         }
         if (sv_eq(token, SVLIT("gt"))) {
             if (!compile_query_primary(original_src, src, query)) return false;
-            da_append(query, op_gt(token));
+            da_append(query, qop_gt(token));
             continue;
         }
         if (sv_eq(token, SVLIT("ge"))) {
             if (!compile_query_primary(original_src, src, query)) return false;
-            da_append(query, op_gte(token));
+            da_append(query, qop_gte(token));
             continue;
         }
         if (sv_eq(token, SVLIT("eq"))) {
             if (!compile_query_primary(original_src, src, query)) return false;
-            da_append(query, op_eq(token));
+            da_append(query, qop_eq(token));
             continue;
         }
         if (sv_eq(token, SVLIT("ne"))) {
             if (!compile_query_primary(original_src, src, query)) return false;
-            da_append(query, op_neq(token));
+            da_append(query, qop_neq(token));
             continue;
         }
         *src = saved_src;
@@ -320,13 +327,14 @@ bool compile_query_and(String_View original_src, String_View *src, Query *query)
     if (!compile_query_compare(original_src, src, query)) return false;
     for (;;) {
         String_View saved_src = *src;
-        String_View token = chop_next_query_token(src);
+        String_View token = {0};
+        chop_next_query_token(src, &token);
         if (!sv_eq(token, sv_from_cstr("and"))) {
             *src = saved_src;
             return true;
         }
         if (!compile_query_compare(original_src, src, query)) return false;
-        da_append(query, op_and(token));
+        da_append(query, qop_and(token));
     }
     return true;
 }
@@ -337,13 +345,14 @@ bool compile_query_or(String_View original_src, String_View *src, Query *query)
     if (!compile_query_and(original_src, src, query)) return false;
     for (;;) {
         String_View saved_src = *src;
-        String_View token = chop_next_query_token(src);
+        String_View token = {0};
+        chop_next_query_token(src, &token);
         if (!sv_eq(token, sv_from_cstr("or"))) {
             *src = saved_src;
             return true;
         }
         if (!compile_query_and(original_src, src, query)) return false;
-        da_append(query, op_or(token));
+        da_append(query, qop_or(token));
     }
     return true;
 }
@@ -357,8 +366,8 @@ bool compile_query_expr(String_View original_src, String_View *src, Query *query
 bool compile_query(String_View original_src, String_View *src, Query *query)
 {
     if (!compile_query_expr(original_src, src, query)) return false;
-    String_View end = chop_next_query_token(src);
-    if (end.count != 0) {
+    String_View end = {0};
+    if (chop_next_query_token(src, &end)) {
         fprintf(stderr, "Supported infix operators:\n");
         fprintf(stderr, "\n");
         fprintf(stderr, "    and  or                  - logical operators\n");
@@ -400,24 +409,24 @@ const char *type_name(Type type)
     return NULL;
 }
 
-Op op(Op_Kind kind, String_View src)
+QOp qop(QOp_Kind kind, String_View src)
 {
-    return (Op) { .kind = kind, .src = src };
+    return (QOp) { .kind = kind, .src = src };
 }
 
-Op op_set_tag(Op op, String_View tag)
+QOp qop_set_tag(QOp op, String_View tag)
 {
     op.as.tag = tag;
     return op;
 }
 
-Op op_set_id(Op op, String_View id)
+QOp qop_set_id(QOp op, String_View id)
 {
     op.as.id = id;
     return op;
 }
 
-Op op_set_integer(Op op, long integer)
+QOp qop_set_integer(QOp op, long integer)
 {
     op.as.integer = integer;
     return op;

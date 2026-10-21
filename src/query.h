@@ -17,61 +17,63 @@
 
 #include "task.h"
 
-String_View chop_next_query_token(String_View *src);
+bool chop_next_query_token(String_View *src, String_View *token);
+
+// TASK(20261015-203224): all the op names related to the query language should change their names from `op` to `qop` similarly to update ops being `uop`
 
 typedef enum {
-    OP_ANY,
-    OP_TAG,
-    OP_NOT,
-    OP_OR,
-    OP_AND,
-    OP_TAGGED,
-    OP_ID,
-    OP_PRIORITY,
-    OP_INTEGER,
-    OP_LT,
-    OP_GT,
-    OP_LTE,
-    OP_GTE,
-    OP_EQ,
-    OP_NEQ,
-} Op_Kind;
+    QOP_ANY,
+    QOP_TAG,
+    QOP_NOT,
+    QOP_OR,
+    QOP_AND,
+    QOP_TAGGED,
+    QOP_ID,
+    QOP_PRIORITY,
+    QOP_INTEGER,
+    QOP_LT,
+    QOP_GT,
+    QOP_LTE,
+    QOP_GTE,
+    QOP_EQ,
+    QOP_NEQ,
+} QOp_Kind;
 
 typedef struct {
-    Op_Kind kind;
+    QOp_Kind kind;
     union {
         String_View tag;
         String_View id;
         long integer;
     } as;
     String_View src;
-} Op;
+} QOp;
 
-void print_op(Op op);
+void print_qop(QOp op);
 
-Op op(Op_Kind kind, String_View src);
-Op op_set_tag(Op op, String_View tag);
-Op op_set_id(Op op, String_View id);
-Op op_set_integer(Op op, long integer);
+QOp qop(QOp_Kind kind, String_View src);
+QOp qop_set_tag(QOp op, String_View tag);
+QOp qop_set_id(QOp op, String_View id);
+QOp qop_set_integer(QOp op, long integer);
 
-#define op_tag(src, tag)         op_set_tag(op(OP_TAG, (src)), (tag))
-#define op_integer(src, integer) op_set_integer(op(OP_INTEGER, (src)), (integer))
-#define op_id(src, id)           op_set_id(op(OP_ID, (src)), (id))
-#define op_not(src)              op(OP_NOT, (src))
-#define op_any(src)              op(OP_ANY, (src))
-#define op_tagged(src)           op(OP_TAGGED, (src))
-#define op_priority(src)         op(OP_PRIORITY, (src))
-#define op_lt(src)               op(OP_LT, (src))
-#define op_gt(src)               op(OP_GT, (src))
-#define op_lte(src)              op(OP_LTE, (src))
-#define op_gte(src)              op(OP_GTE, (src))
-#define op_eq(src)               op(OP_EQ, (src))
-#define op_neq(src)              op(OP_NEQ, (src))
-#define op_and(src)              op(OP_AND, (src))
-#define op_or(src)               op(OP_OR, (src))
+#define qop_tag(src, tag)         qop_set_tag(qop(QOP_TAG, (src)), (tag))
+#define qop_integer(src, integer) qop_set_integer(qop(QOP_INTEGER, (src)), (integer))
+#define qop_id(src, id)           qop_set_id(qop(QOP_ID, (src)), (id))
+#define qop_not(src)              qop(QOP_NOT, (src))
+#define qop_any(src)              qop(QOP_ANY, (src))
+#define qop_tagged(src)           qop(QOP_TAGGED, (src))
+#define qop_priority(src)         qop(QOP_PRIORITY, (src))
+#define qop_lt(src)               qop(QOP_LT, (src))
+#define qop_gt(src)               qop(QOP_GT, (src))
+#define qop_lte(src)              qop(QOP_LTE, (src))
+#define qop_gte(src)              qop(QOP_GTE, (src))
+#define qop_eq(src)               qop(QOP_EQ, (src))
+#define qop_neq(src)              qop(QOP_NEQ, (src))
+#define qop_and(src)              qop(QOP_AND, (src))
+#define qop_or(src)               qop(QOP_OR, (src))
 
 typedef struct {
-    Op *items;
+    QOp *items;
     size_t count;
     size_t capacity;
 } Query;
@@ -107,11 +109,13 @@ typedef struct {
 } Stack;
 
 typedef enum {
-    TMR_MATCHED,
-    TMR_MISMATCHED,
-    TMR_ERROR,
-} Task_Match_Result;
+    QUERY_MATCHED,
+    QUERY_MISMATCHED,
+    QUERY_ERROR,
+} Query_Match_Result;
 
-Task_Match_Result task_matches_query(String_View original_src, const Task *task, Query query, Stack *stack);
+Query_Match_Result task_matches_query(String_View original_src, Task task, Query query, Stack *stack);
+
+void report_compile_query_diagnostic(String_View original_src, String_View src, const char *format, ...) NOB_PRINTF_FORMAT(3, 4);
 
 #endif // QUERY_H_

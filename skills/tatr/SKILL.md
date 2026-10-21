@@ -6,7 +6,7 @@ compatibility: Requires a trusted tatr executable on PATH or an explicitly suppl
 
 # tatr — collaborative task maintenance
 
-`tatr` is a local CLI over version-controlled Markdown files, not a hosted issue tracker. Use the CLI to discover/create tasks and targeted file edits to maintain them. No plugin, service, or additional dependency is needed for normal task work.
+`tatr` is a local CLI over version-controlled Markdown files, not a hosted issue tracker. Use the CLI to discover/create tasks, `ls -update` for authorized status/tag changes, and targeted file edits for other maintenance. No plugin, service, or additional dependency is needed for normal task work.
 
 ## 1. Establish the project and executable
 
@@ -53,7 +53,7 @@ tatr new -t bug -t parser -p 100 Fix parser error handling
 - Options go before the title/query. `new` defaults to title `New Task`, status `OPEN`, and priority `100`.
 - Optional `-s alice` adds a team suffix. **Only use a nonempty suffix matching `[A-Za-z0-9-]+`; never use slashes, dots, whitespace, or untrusted raw input.**
 - IDs use UTC `YYYYMMDD-HHMMSS`, optionally followed by `-suffix`. Use the CLI-generated ID; if creation reports a collision, verify the existing task, wait at least one second, then retry. Never overwrite or rename someone else's task to bypass a collision.
-- Capture the reported task path, read it, and replace the generated `No description.` with a focused description, scope/acceptance criteria, and any useful evidence or links. Do not create speculative tasks the user did not request.
+- Capture the reported task path, read it, and add a focused description, scope/acceptance criteria, and any useful evidence or links. Do not create speculative tasks the user did not request.
 - Preserve the title, existing body, attachments, unknown properties, and human notes except where the requested change requires an edit. Re-read immediately before editing if another person/agent might have changed it. Use small exact edits, not stale full-file rewrites.
 
 Canonical format:
@@ -78,11 +78,11 @@ Only `OPEN` and `CLOSED` are standard statuses. Use existing team tags for workf
 
 Tags are case-sensitive and separated by commas or whitespace. Prefer simple existing tags without spaces, commas, `[` or `]`. `tasks/tags` optionally documents them as `<tag> , <description>`. Avoid duplicate property keys.
 
-There are no `edit`, `close`, `assign`, or `delete` commands. Change title, status, priority, tags, and description by editing `TASK.md` directly. When linking a task from code/another task, a literal ID (often `TASK(20260829-235855-rexim)`) makes it discoverable by `ref`; use relative Markdown links for attachments.
+There are no standalone `edit`, `close`, `assign`, or `delete` commands. `ls -update` supports `open`, `close`, `+tag`, and `-tag`, combined with commas or whitespace. Change title, priority, and description by editing `TASK.md` directly; direct edits also work for status and tags. When linking a task from code/another task, a literal ID (often `TASK(20260829-235855-rexim)`) makes it discoverable by `ref`; use relative Markdown links for attachments.
 
 ## 4. Tatr Query Language (TQL)
 
-`ls` and `untag` accept TQL. Quote a whole query when using a shell, especially if it contains brackets or shell metacharacters. Prefer argument arrays over building shell strings from user text. Do not use `eval`.
+`ls` accepts TQL, including when applying `-update`. Quote a whole query when using a shell, especially if it contains brackets or shell metacharacters. Prefer argument arrays over building shell strings from user text. Do not use `eval`.
 
 ```sh
 tatr ls ':bug'
@@ -140,31 +140,34 @@ Do not assume conventional `--` end-of-options handling: this build retains it i
 | `nvim-setup` | Check Neovim `exrc`, install `.nvim.lua`, update `.gitignore`; user must approve trust |
 | `skill-setup` | Install `.agents/skills/tatr/SKILL.md` and update `.gitignore`; no Neovim needed |
 | `ls [-c] [-a] [-id] [QUERY...]` | List tasks; descending priority by default; `-a` reverses order; `-id` sorts by ID |
+| `ls -update ACTIONS [-c] QUERY...` | Apply `open`, `close`, `+tag`, or `-tag` to matching tasks; rewrites files in place; explicit query required |
 | `ls -debug [QUERY...]` | Print query tokens/opcodes; does not evaluate against tasks or prove type correctness |
 | `new [-t TAG]... [-p N] [-s SUFFIX] [TITLE...]` | Create a task; writes files |
+| `todo [-s SUFFIX] FILE...` | Interactively convert source TODOs into tasks; writes task files and source files |
 | `find HUID [-path-only]` | Report task or print only its path |
+| `id` | Print the current task ID; run directly inside its task directory |
 | `ref [HUID]` | Find ID references; omit ID only directly inside its task directory |
 | `summary [-c]` | Counts and tag summary; no per-task locations |
-| `untag [-c] -t TAG [-t TAG]... QUERY...` | Remove tags from matching tasks; rewrites files in place |
+| `tag`, `untag` | Deprecated; fail with a suggested `ls -update` replacement |
 | `graph` | Optional Graphviz output; writes/overwrites `graph.dot` and `graph.svg` in the current directory |
-| `help`, `version`, `<command> -help` | Inspect usage/version |
+| `help [COMMAND]`, `help -d`, `version`, `<command> -help` | Inspect usage/version; `help -d` also lists deprecated commands |
 
-Prefer direct edits for one task. For a requested bulk tag removal:
+Prefer direct edits for one task. For a requested bulk status/tag update:
 
 1. Ensure the human has saved any affected editor buffers.
 2. Preview the exact selection with `ls`, including the same `-c` setting.
 3. Verify the paths are ordinary task files inside the intended project, not symlinks (including path components) or files with unexpected hard links. Stop on suspicious paths; don't automatically unlink them.
 4. Obtain confirmation if the user has not already authorized this exact bulk change. There is no dry-run or transactional rollback.
-5. Run `untag`, inspect the diff, and report every affected ID. Never use a broad `any` selection by accident.
+5. Run `ls -update`, inspect the diff, and report every affected ID. Never use a broad `any` selection by accident. An empty query is rejected; `any` explicitly selects all tasks in the chosen open/closed set.
 
 Example, only after that preview/authorization:
 
 ```sh
 tatr ls ':obsolete'
-tatr untag -t obsolete ':obsolete'
+tatr ls -update '-obsolete' ':obsolete'
 ```
 
-Apply the same path checks to direct file edits. Work as a normal user, not with sudo. Only modify trusted databases without concurrent writers, keep backups or version history, and inspect affected files if a command fails. Do not run `graph` unless requested and its output paths are safe to overwrite.
+Apply the same path checks to direct file edits. Work as a normal user, not with sudo. Only modify trusted databases without concurrent writers, keep backups or version history, and inspect affected files if a command fails. Do not run `todo` unless source rewriting is requested, or `graph` unless requested and its output paths are safe to overwrite.
 
 ## 6. Human-agent handoff
 

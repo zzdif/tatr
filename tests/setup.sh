@@ -33,8 +33,16 @@ reject_setup_here() {
 }
 
 cd "$project"
-succeeds "$binary" skill-setup -help
-succeeds "$binary" nvim-setup -help
+for command in skill-setup nvim-setup; do
+    succeeds "$binary" "$command" -help
+    contains "Usage:" "$log"
+    contains "$command [OPTIONS]" "$log"
+    "$binary" help "$command" >"$tmp/help-stdout" 2>"$tmp/help-stderr" || fail 'help dispatch failed'
+    cmp "$log" "$tmp/help-stdout" || fail 'help dispatch differs from -help'
+    test ! -s "$tmp/help-stderr" || fail 'help should write to stdout only'
+    fails "$binary" "$command" -unknown
+    contains 'Usage:' "$log"
+done
 test ! -e .agents && test ! -e .nvim.lua || fail 'help wrote files'
 fails "$binary" skill-setup unexpected
 test ! -e .agents || fail 'invalid arguments wrote files'

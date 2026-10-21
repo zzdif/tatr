@@ -14,6 +14,7 @@
 // with this program; if not, see <https://www.gnu.org/licenses/>.
 #include "huid.h"
 
+// TODO: Test Task 1
 bool is_alnum_or_dash(char x)
 {
     return isalnum(x) || x == '-';
@@ -60,6 +61,7 @@ bool is_valid_huid(const char *id)
 
 char *temp_new_huid(const char *suffix)
 {
+    // TODO: Test Task 2
     time_t rawtime;
     time(&rawtime);
     struct tm * timeinfo = gmtime(&rawtime);
@@ -70,6 +72,7 @@ char *temp_new_huid(const char *suffix)
         timeinfo->tm_hour,
         timeinfo->tm_min,
         timeinfo->tm_sec);
+    // TODO: Test Task 3
     if (suffix) {
         id = temp_sprintf("%s-%s", id, suffix);
     }

@@ -1,8 +1,8 @@
 # `tatr-untag` must report each modification with a compiler style report pointing at the line where the `TAGS` property is located
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 105
-- TAGS: scope
+- TAGS:
 
 Grep for refs.
 

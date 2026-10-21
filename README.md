@@ -164,9 +164,9 @@ The same setup works with queries and other commands:
 :make! ref 20260829-235855-rexim
 ```
 
-Replace the example IDs with your own. Edit and save `TASK.md` normally to change its description, status, priority, or tags, then rerun `:make! ls` to refresh the list. Save changes before running commands that modify tasks, such as `untag`.
+Replace the example IDs with your own. Edit and save `TASK.md` normally to change its description, status, priority, or tags, then rerun `:make! ls` to refresh the list. Save changes before running commands that modify tasks, such as `ls -update`.
 
-These settings replace your normal `:make` command and output parser for the session; they are not required in your editor config. Informational output (such as "No tasks were found") remains visible in quickfix but is not a jump target. `summary` and `untag` do not produce per-task locations.
+These settings replace your normal `:make` command and output parser for the session; they are not required in your editor config. Informational output (such as "No tasks were found") remains visible in quickfix but is not a jump target. `summary` does not produce per-task locations. `tag` and `untag` are deprecated; use `ls -update` instead.
 
 ### Agent skill
 
@@ -272,6 +272,27 @@ Since brackets have a special meaning in TQL, if you have any tags that contain 
 | `<a> ge <b>` | True when `<a>` is greater or equal to `<b>`.|
 | `<a> eq <b>` | True when `<a>` is equal to `<b>`.|
 | `<a> ne <b>` | True when `<a>` is not equal to `<b>`.|
+
+## Tatr Update Language
+
+Comma-separated list of actions to apply to a list of tasks filtered by `tatr-ls`.
+
+For example:
+
+```
+$ tatr ls -update 'close,-scope' :bug
+```
+
+Above command closes all the tasks with tag `bug` and removes the `scope` tag from them if they had any.
+
+### Reference
+
+|Action|Description|
+|-|-|
+|`+tag`| Add tag to the task |
+|`-tag`| Remove tag from the task |
+|`close`| Close the task |
+|`open`| Open the task |
 
 ## The License
 

@@ -1,6 +1,6 @@
 # If git state is dirty the baked git hash should indicate that
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS:
 

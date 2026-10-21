@@ -2,7 +2,7 @@
 
 - STATUS: OPEN
 - PRIORITY: 100
-- TAGS:
+- TAGS: spec
 
 As the amount of tasks grows over time I expect a lot of closed
 irrelevant tasks accumulating in the `tasks/` folder slowing down

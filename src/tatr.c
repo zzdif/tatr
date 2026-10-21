@@ -21,8 +21,11 @@
 #include "huid.h"
 #include "md.h"
 #include "query.h"
+#include "update.h"
 #include "task.h"
 #include "build.h"
+
+#include <inttypes.h>
 
 #define DEFAULT_TASK_TITLE "New Task"
 #define DEFAULT_PRIORITY 100
@@ -52,7 +55,7 @@ bool find_tasks_database(Path *dir_path)
         }
         dir_path->count -= 2;
     }
-    nob_log(ERROR, "Could not find tasks/ folder");
+    fprintf(stderr, "ERROR: Could not find tasks/ folder\n");
     return_defer(false);
 defer:
     free(sb_path.items);
@@ -85,20 +88,38 @@ typedef struct Command Command;
 
 struct Command {
     const char *name;
-    const char *description;
+    const char *short_description;
+    const char *extra_description;
     const char *signature;
+    bool deprecated;
     bool (*run)(Command *self, const char *program_name, int argc, char **argv);
 };
 
-void print_command_usage(Command *command, const char *program_name, void *c)
+void print_command_usage(FILE *sink, Command *command, const char *program_name, void *c)
 {
+    fprintf(sink, "Usage:\n");
+    fprintf(sink, "    %s %s", program_name, command->name);
     if (command->signature) {
-        fprintf(stderr, "Usage: %s %s %s\n", program_name, command->name, command->signature);
-    } else {
-        fprintf(stderr, "Usage: %s %s\n", program_name, command->name);
+        fprintf(sink, " %s", command->signature);
     }
-    fprintf(stderr, "OPTIONS:\n");
-    flag_c_print_options(c, stderr);
+    fprintf(sink, "\n");
+    fprintf(sink, "\n");
+
+    if (command->short_description) {
+        fprintf(sink, "Description:\n");
+        fprintf(sink, "    %s", command->short_description);
+        if (command->extra_description) {
+            fprintf(sink, " %s", command->extra_description);
+        }
+        fprintf(sink, "\n");
+        fprintf(sink, "\n");
+    }
+
+    if (c) {
+        fprintf(sink, "OPTIONS:\n");
+        flag_c_print_options(c, sink);
+        fprintf(sink, "\n");
+    }
 }
 
 bool init_run(Command *self, const char *program_name, int argc, char **argv)
@@ -114,13 +135,13 @@ bool init_run(Command *self, const char *program_name, int argc, char **argv)
 #endif // TASKS_README_MD
 
     if (!flag_c_parse(c, argc, argv)) {
-        print_command_usage(self, program_name, c);
+        print_command_usage(stderr, self, program_name, c);
         flag_c_print_error(c, stderr);
         return false;
     }
 
     if (help) {
-        print_command_usage(self, program_name, c);
+        print_command_usage(stdout, self, program_name, c);
         return true;
     }
 
@@ -133,56 +154,27 @@ bool init_run(Command *self, const char *program_name, int argc, char **argv)
     const char *tasks_readme_md_file = "./tasks/README.md";
     if (!file_exists(tasks_readme_md_file) && !no_readme) {
         if (!write_entire_file(tasks_readme_md_file, TASKS_README_MD, ARRAY_LEN(TASKS_README_MD))) return false;
-        nob_log(INFO, "created %s", tasks_readme_md_file);
+        printf("Created %s\n", tasks_readme_md_file);
     }
 #endif // TASKS_README_MD
 
     return true;
 }
 
-void render_task_md(Task task, String_Builder *sb)
-{
-    sb_appendf(sb, "# "SV_Fmt"\n", SV_Arg(task.title));
-    sb_appendf(sb, "\n");
-    da_foreach(Property, property, &task.properties) {
-        if (sv_eq(property->key, SVLIT("TAGS"))) {
-            sb_appendf(sb, "- TAGS:");
-            bool first = true;
-            da_foreach(String_View, tag, &task.tags) {
-                if (first) {
-                    sb_appendf(sb, " ");
-                } else {
-                    sb_appendf(sb, ",");
-                }
-                sb_appendf(sb, SV_Fmt, SV_Arg(*tag));
-                first = false;
-            }
-            sb_appendf(sb, "\n");
-        } else if (sv_eq(property->key, SVLIT("STATUS"))) {
-            sb_appendf(sb, "- STATUS: "SV_Fmt"\n", SV_Arg(task.status));
-        } else if (sv_eq(property->key, SVLIT("PRIORITY"))) {
-            sb_appendf(sb, "- PRIORITY: %d\n", task.priority);
-        } else {
-            sb_appendf(sb, "- "SV_Fmt": "SV_Fmt"\n", SV_Arg(property->key), SV_Arg(property->value));
-        }
-    }
-    sb_appendf(sb, SV_Fmt, SV_Arg(task.body));
-}
-
-bool untag_run(Command *self, const char *program_name, int argc, char **argv)
+bool tag_run(Command *self, const char *program_name, int argc, char **argv)
 {
     String_Builder query_src = {0};
-    Flag_List tags_to_remove = {0};
+    Flag_List tags_to_add = {0};
     bool help = false;
     bool closed = false;
 
     void *c = flag_c_new(program_name);
-    flag_c_list_var(c, &tags_to_remove, "t", "Tags to remove from the tasks");
-    flag_c_bool_var(c, &closed, "c", false, "List closed tasks");
+    flag_c_list_var(c, &tags_to_add, "t", "Tags to add to the tasks");
+    flag_c_bool_var(c, &closed, "c", false, "Process closed tasks");
     flag_c_bool_var(c, &help, "help", false, "Print this help message");
 
     if (!flag_c_parse(c, argc, argv)) {
-        print_command_usage(self, program_name, c);
+        print_command_usage(stderr, self, program_name, c);
         flag_c_print_error(c, stderr);
         return false;
     }
@@ -191,8 +183,13 @@ bool untag_run(Command *self, const char *program_name, int argc, char **argv)
     argv = flag_c_rest_argv(c);
 
     if (help) {
-        print_command_usage(self, program_name, c);
+        print_command_usage(stdout, self, program_name, c);
         return true;
+    }
+
+    if (tags_to_add.count == 0) {
+        fprintf(stderr, "ERROR: no tags are provided\n");
+        return false;
     }
 
     if (argc <= 0) {
@@ -205,64 +202,77 @@ bool untag_run(Command *self, const char *program_name, int argc, char **argv)
         sb_append_cstr(&query_src, shift(argv, argc));
     }
 
-    String_View src = sv_trim(sb_to_sv(query_src));
-    String_View original_src = src;
-    Query query = {0};
-    if (!compile_query(original_src, &src, &query)) return false;
-
-    char *dir_path = find_relative_tasks_directory();
-    if (!dir_path) return false;
-
-    Tasks tasks = {0};
-    if (!load_tasks(&tasks, dir_path)) return false;
-
-    Stack stack = {0};
-
-    size_t tasks_updated = 0;
-    da_foreach(Task, task, &tasks) {
-        if (closed) {
-            if (!sv_eq(task->status, SVLIT("CLOSED"))) continue;
-        } else {
-            if (sv_eq(task->status, SVLIT("CLOSED"))) continue;
+    String_Builder alternative_command = {0};
+    sb_append_cstr(&alternative_command, program_name);
+    sb_append_cstr(&alternative_command, " ls -update ");
+    da_foreach(const char *, tag, &tags_to_add) {
+        if (tag != tags_to_add.items) {
+            sb_append(&alternative_command, ',');
         }
-        switch (task_matches_query(original_src, task, query, &stack)) {
-        case TMR_MATCHED:    break;
-        case TMR_MISMATCHED: continue;
-        case TMR_ERROR:      return false;
-        default:             UNREACHABLE("Task_Match_Result");
-        }
+        sb_appendf(&alternative_command, "+%s", *tag);
+    }
+    sb_append_cstr(&alternative_command, " ");
+    sb_append_sb(&alternative_command, query_src);
+    sb_append_null(&alternative_command);
+    fprintf(stderr, "ERROR: This command is deprecated! Please use `%s` instead!\n", alternative_command.items);
+    return false;
+}
 
-        bool updated = false;
-        for (size_t i = 0; i < task->tags.count; ) {
-            bool remove = false;
-            for (size_t j = 0; !remove && j < tags_to_remove.count; ++j) {
-                if (sv_eq(task->tags.items[i], sv_from_cstr(tags_to_remove.items[j]))) {
-                    remove = true;
-                }
-            }
-            if (remove) {
-                updated = true;
-                da_remove_unordered(&task->tags, i);
-            } else {
-                i += 1;
-            }
-        }
+bool untag_run(Command *self, const char *program_name, int argc, char **argv)
+{
+    String_Builder query_src = {0};
+    Flag_List tags_to_remove = {0};
+    bool help = false;
+    bool closed = false;
 
-        if (updated) {
-            String_Builder sb = {0};
-            render_task_md(*task, &sb);
-            // TASK(20260912-085629): `tatr-untag` must report each modification with a compiler style report pointing at the line where the `TAGS` property is located
-            if (!write_entire_file(temp_sprintf("%s/%s/TASK.md", dir_path, task->id), sb.items, sb.count)) {
-                return false;
-            }
+    void *c = flag_c_new(program_name);
+    flag_c_list_var(c, &tags_to_remove, "t", "Tags to remove from the tasks");
+    flag_c_bool_var(c, &closed, "c", false, "Process closed tasks");
+    flag_c_bool_var(c, &help, "help", false, "Print this help message");
 
-            tasks_updated += 1;
-        }
+    if (!flag_c_parse(c, argc, argv)) {
+        print_command_usage(stderr, self, program_name, c);
+        flag_c_print_error(c, stderr);
+        return false;
     }
 
-    nob_log(INFO, "%zu tasks updated", tasks_updated);
+    argc = flag_c_rest_argc(c);
+    argv = flag_c_rest_argv(c);
 
-    return true;
+    if (help) {
+        print_command_usage(stdout, self, program_name, c);
+        return true;
+    }
+
+    if (argc <= 0) {
+        fprintf(stderr, "ERROR: no query is provided\n");
+        return false;
+    }
+
+    if (tags_to_remove.count == 0) {
+        fprintf(stderr, "ERROR: no tags are provided\n");
+        return false;
+    }
+
+    while (argc > 0) {
+        if (query_src.count > 0) sb_append(&query_src, ' ');
+        sb_append_cstr(&query_src, shift(argv, argc));
+    }
+
+    String_Builder alternative_command = {0};
+    sb_append_cstr(&alternative_command, program_name);
+    sb_append_cstr(&alternative_command, " ls -update ");
+    da_foreach(const char *, tag, &tags_to_remove) {
+        if (tag != tags_to_remove.items) {
+            sb_append(&alternative_command, ',');
+        }
+        sb_appendf(&alternative_command, "-%s", *tag);
+    }
+    sb_append_cstr(&alternative_command, " ");
+    sb_append_sb(&alternative_command, query_src);
+    sb_append_null(&alternative_command);
+    fprintf(stderr, "ERROR: This command is deprecated! Please use `%s` instead!\n", alternative_command.items);
+    return false;
 }
 
 bool ls_run(Command *self, const char *program_name, int argc, char **argv)
@@ -272,17 +282,18 @@ bool ls_run(Command *self, const char *program_name, int argc, char **argv)
     bool help = false;
     bool debug = false;
     bool by_id = false;
-    String_Builder query_src = {0};
+    Flag_List updates_from_flags = {0};
 
     void *c = flag_c_new(program_name);
     flag_c_bool_var(c, &closed, "c", false, "List closed tasks");
     flag_c_bool_var(c, &ascending, "a", false, "List tasks in ascending order");
     flag_c_bool_var(c, &by_id, "id", false, "Sort tasks by id");
+    flag_c_list_var(c, &updates_from_flags, "update", "Apply update operations on the resulting list");
     flag_c_bool_var(c, &debug, "debug", false, "Output opcodes of the query for debug purpose");
     flag_c_bool_var(c, &help, "help", false, "Print this help message");
 
     if (!flag_c_parse(c, argc, argv)) {
-        print_command_usage(self, program_name, c);
+        print_command_usage(stderr, self, program_name, c);
         flag_c_print_error(c, stderr);
         return false;
     }
@@ -290,38 +301,75 @@ bool ls_run(Command *self, const char *program_name, int argc, char **argv)
     argc = flag_c_rest_argc(c);
     argv = flag_c_rest_argv(c);
 
-    while (argc > 0) {
-        if (query_src.count > 0) sb_append(&query_src, ' ');
-        sb_append_cstr(&query_src, shift(argv, argc));
-    }
-
     if (help) {
-        print_command_usage(self, program_name, c);
+        print_command_usage(stdout, self, program_name, c);
         return true;
     }
 
-    String_View src = sv_trim(sb_to_sv(query_src));
-    if (src.count == 0) src = sv_from_cstr("any");
-    String_View original_src = src;
+    bool query_is_empty = false;
+
+    // Compiling query
+    String_Builder sb_query_src = {0};
+    while (argc > 0) {
+        if (sb_query_src.count > 0) sb_append(&sb_query_src, ' ');
+        sb_append_cstr(&sb_query_src, shift(argv, argc));
+    }
+    String_View query_src = sv_trim(sb_to_sv(sb_query_src));
+    if (query_src.count == 0) {
+        query_src = sv_from_cstr("any");
+        query_is_empty = true;
+    }
+    String_View original_query_src = query_src;
     Query query = {0};
-    if (!compile_query(original_src, &src, &query)) return false;
+    if (!compile_query(original_query_src, &query_src, &query)) return false;
+
+    // Compiling update
+    String_Builder sb_updates_src = {0};
+    da_foreach(const char *, updates_cstr, &updates_from_flags) {
+        sb_append_cstr(&sb_updates_src, *updates_cstr);
+        sb_append(&sb_updates_src, ' ');
+    }
+    String_View update_src = sv_trim(sb_to_sv(sb_updates_src));
+    String_View original_update_src = update_src;
+    Update update = {0};
+    if (!compile_update(original_update_src, &update_src, &update)) return false;
 
     // TASK(20260910-181239): `tatr ls -debug` should be a separate command
     if (debug) {
-        printf("TOKENS:\n");
-        src = sv_trim(sb_to_sv(query_src));
-        for (;;) {
-            String_View token = chop_next_query_token(&src);
-            if (token.count == 0) break;
+        printf("QUERY TOKENS:\n");
+        query_src = sv_trim(sb_to_sv(sb_query_src));
+        String_View token = {0};
+        while (chop_next_query_token(&query_src, &token)) {
             printf("    "SV_Fmt"\n", SV_Arg(token));
         }
         printf("\n");
-        printf("OPS:\n");
-        da_foreach(Op, op, &query) {
+        printf("QUERY OPS:\n");
+        da_foreach(QOp, op, &query) {
             printf("    ");
-            print_op(*op);
+            print_qop(*op);
+        }
+        if (update.count) {
+            printf("\n");
+            printf("UPDATE TOKENS:\n");
+            query_src = sv_trim(sb_to_sv(sb_updates_src));
+            String_View token = {0};
+            while (chop_next_update_token(&query_src, &token)) {
+                printf("    "SV_Fmt"\n", SV_Arg(token));
+            }
+            printf("\n");
+            printf("UPDATE OPS:\n");
+            da_foreach(UOp, op, &update) {
+                printf("    ");
+                print_uop(*op);
+            }
         }
         return true;
+    }
+
+    if (update.count > 0 && query_is_empty) {
+        fprintf(stderr, "ERROR: -%s with empty query is not allowed!\n", flag_c_name(c, &updates_from_flags));
+        fprintf(stderr, "NOTE: if you do want to update all the tasks use \"any\" query\n");
+        return false;
     }
 
     char *dir_path = find_relative_tasks_directory();
@@ -342,19 +390,33 @@ bool ls_run(Command *self, const char *program_name, int argc, char **argv)
     Stack stack = {0};
 
     size_t tasks_matched = 0;
+    size_t tasks_updated = 0;
     da_foreach(Task, task, &tasks) {
+        String_View status = task->status;
         if (closed) {
-            if (!sv_eq(task->status, SVLIT("CLOSED"))) continue;
+            if (!sv_eq(status, SVLIT("CLOSED"))) continue;
         } else {
-            if (sv_eq(task->status, SVLIT("CLOSED"))) continue;
+            if (sv_eq(status, SVLIT("CLOSED"))) continue;
         }
-        switch (task_matches_query(original_src, task, query, &stack)) {
-        case TMR_MATCHED:    break;
-        case TMR_MISMATCHED: continue;
-        case TMR_ERROR:      return false;
+        switch (task_matches_query(original_query_src, *task, query, &stack)) {
+        case QUERY_MATCHED:    break;
+        case QUERY_MISMATCHED: continue;
+        case QUERY_ERROR:      return false;
         default:             UNREACHABLE("Task_Match_Result");
         }
-        print_task_report(dir_path, task);
+
+        if (update_task(task, update)) {
+            String_View update_src = sv_trim(sb_to_sv(sb_updates_src));
+            String_Builder task_md_content = {0};
+            render_task_md(*task, &task_md_content, NULL);
+            const char *task_md_path = temp_sprintf("%s/%s/TASK.md", dir_path, task->id);
+            if (!write_entire_file(task_md_path, task_md_content.items, task_md_content.count)) return false;
+            print_task_report(dir_path, task, update_src);
+            tasks_updated += 1;
+        } else {
+            print_task_report(dir_path, task, SVNULL);
+        }
+
         tasks_matched += 1;
     }
 
@@ -363,25 +425,230 @@ bool ls_run(Command *self, const char *program_name, int argc, char **argv)
         return true;
     }
 
+    if (tasks_updated > 0) {
+        printf("%zu tasks where updated\n", tasks_updated);
+        return true;
+    }
+
+    return true;
+}
+
+char *create_new_task(const char *dir_path, const char *id_suffix, String_View title, int priority, Parsed_Tags parsed_tags)
+{
+    char *id = temp_new_huid(id_suffix);
+    char *task_path = temp_sprintf("%s/%s", dir_path, id);
+    if (file_exists(task_path)) {
+        // We hit an already existing HUID. Let's try to wait 1 second to acquire the next one.
+        sleep(1);
+        id = temp_new_huid(id_suffix);
+        task_path = temp_sprintf("%s/%s", dir_path, id);
+        if (file_exists(task_path)) {
+            // We still hit an existing HUID even afte waiting for 1 second.
+            // Something is wrong with the environment. Better report an error.
+            fprintf(stderr, "ERROR: %s already exists. You are probably creating tasks too fast, or your time is broken\n", id);
+            return NULL;
+        }
+    }
+    if (!mkdir_if_not_exists(task_path)) return NULL;
+
+    Task task = {
+        .id          = id,
+        .title       = title,
+        .status      = SVLIT("OPEN"),
+        .priority    = priority,
+        .parsed_tags = parsed_tags
+    };
+
+    properties_put(&task.properties, SVLIT("STATUS"), SVNULL);
+    properties_put(&task.properties, SVLIT("PRIORITY"), SVNULL);
+    properties_put(&task.properties, SVLIT("TAGS"), SVNULL);
+
+    String_Builder sb_md_content = {0};
+
+    render_task_md(task, &sb_md_content, NULL);
+    const char *task_md_path = temp_sprintf("%s/%s/TASK.md", dir_path, id);
+    if (!write_entire_file(task_md_path, sb_md_content.items, sb_md_content.count)) return NULL;
+    print_task_report(dir_path, &task, SVNULL);
+    return id;
+}
+
+typedef struct {
+    char c;
+    const char *description;
+} Prompt_Option;
+
+char user_prompt(const char *prompt, Prompt_Option *options, size_t options_count)
+{
+    char buffer[256];
+    for (;;) {
+        printf("%s [", prompt);
+        for (size_t i = 0; i < options_count; ++i) {
+            printf("%c,", options[i].c);
+        }
+        printf("?] ");
+        fflush(stdout);
+        if (!fgets(buffer, sizeof(buffer), stdin)) return false;
+        for (char *it = buffer; *it; it += 1) *it = tolower(*it);
+        String_View response = sv_trim(sv_from_cstr(buffer));
+        if (sv_eq(response, SVLIT("?"))) {
+            for (size_t i = 0; i < options_count; ++i) {
+                printf("%c - %s\n", options[i].c, options[i].description);
+            }
+            continue;
+        }
+        for (size_t i = 0; i < options_count; ++i) {
+            if (sv_eq(response, sv_from_parts(&options[i].c, 1))) return options[i].c;
+        }
+    }
+}
+
+typedef struct {
+    String_View *items;
+    size_t count;
+    size_t capacity;
+} Lines;
+
+void lines_concat(Lines lines, String_Builder *sb, String_View sep)
+{
+    da_foreach(String_View, line, &lines) {
+        sb_append_sv(sb, *line);
+        sb_append_sv(sb, sep);
+    }
+}
+
+bool todo_run(Command *self, const char *program_name, int argc, char **argv)
+{
+    char *id_suffix = NULL;
+    bool help = false;
+
+    void *c = flag_c_new(program_name);
+    flag_c_str_var(c, &id_suffix, "s", NULL, "Task ID optional suffix");
+    flag_c_bool_var(c, &help, "help", false, "Print this help message");
+
+    bool use_color = isatty(STDOUT_FILENO);
+
+    if (!flag_c_parse(c, argc, argv)) {
+        print_command_usage(stderr, self, program_name, c);
+        flag_c_print_error(c, stderr);
+        return false;
+    }
+
+    argc = flag_c_rest_argc(c);
+    argv = flag_c_rest_argv(c);
+
+    if (help) {
+        print_command_usage(stdout, self, program_name, c);
+        return true;
+    }
+
+    if (argc <= 0) {
+        print_command_usage(stderr, self, program_name, c);
+        fprintf(stderr, "ERROR: no files were provided\n");
+        return false;
+    }
+
+    char *dir_path = find_relative_tasks_directory();
+    if (!dir_path) return false;
+
+    String_Builder sb_input = {0};
+    String_Builder sb_output = {0};
+    Lines lines = {0};
+
+    String_View tag = SVLIT("TO""DO:");
+    size_t checkpoint = temp_save();
+    while (argc > 0) {
+        temp_rewind(checkpoint);
+
+        const char *file_path = shift(argv, argc);
+
+        sb_input.count = 0;
+        if (!read_entire_file(file_path, &sb_input)) return false;
+
+        lines.count = 0;
+        String_View input = sb_to_sv(sb_input);
+        while (input.count > 0) {
+            String_View line = sv_chop_by_delim(&input, '\n');
+            da_append(&lines, line);
+        }
+
+        bool yes_entire_file = false;
+        for (size_t i = 0; i < lines.count; ++i) {
+            String_View line = lines.items[i];
+            size_t line_number = i + 1;
+            int todo_index = sv_find(line, tag);
+            if (todo_index < 0) {
+                continue;
+            }
+            String_View prefix = sv_from_parts(line.data, todo_index);
+            String_View suffix = sv_from_parts(line.data + prefix.count + tag.count, line.count - prefix.count - tag.count);
+            String_View title  = sv_trim(suffix);
+            printf("%s:%zu: Found a TO""DO: "SV_Fmt"\n", file_path, line_number, SV_Arg(title));
+            for (long j = (long)i - 2; j <= (long)i + 2; ++j) {
+                if (j < 0) continue;
+                if (j >= (long)lines.count) continue;
+                if (j == (long)i) {
+                    if (use_color) {
+                        printf(SV_Fmt "\033[1;31mTODO\033[0m:\033[36m" SV_Fmt "\033[0m\n", SV_Arg(prefix), SV_Arg(suffix));
+                    } else {
+                        printf(SV_Fmt "TO""DO:" SV_Fmt "\n", SV_Arg(prefix), SV_Arg(suffix));
+                    }
+                } else {
+                    printf(SV_Fmt"\n", SV_Arg(lines.items[j]));
+                }
+            }
+
+            if (!yes_entire_file) {
+                static Prompt_Option options[] = {
+                    { .c = 'y', .description = "yes"  },
+                    { .c = 'n', .description = "no"   },
+                    { .c = 'q', .description = "quit" },
+                    { .c = 'a', .description = "yes until the end of file" },
+                    { .c = 'c', .description = "no until the end of file" },
+                };
+                switch (user_prompt("Create a task from it?", options, ARRAY_LEN(options))) {
+                case 'y': break;
+                case 'n': continue;
+                case 'q': return true;
+                case 'a': yes_entire_file = true; break;
+                case 'c': goto no_entire_file;
+                default: UNREACHABLE("user_prompt");
+                }
+            }
+
+            Parsed_Tags parsed_tags = {0};
+            char *id = create_new_task(dir_path, id_suffix, title, DEFAULT_PRIORITY, parsed_tags);
+            if (id == NULL) {
+                return false;
+            }
+            lines.items[i] = sv_from_cstr(temp_sprintf(SV_Fmt "TASK(%s):" SV_Fmt, SV_Arg(prefix), id, SV_Arg(suffix)));
+
+            sb_output.count = 0;
+            lines_concat(lines, &sb_output, SVLIT("\n"));
+            if (!write_entire_file(file_path, sb_output.items, sb_output.count)) {
+                return false;
+            }
+        }
+no_entire_file: {}
+    }
     return true;
 }
 
 bool new_run(Command *self, const char *program_name, int argc, char **argv)
 {
-    Flag_List tags = {0};
+    Flag_List tags_from_flags = {0};
     bool help = false;
     uint64_t priority = 0;
-    char *suffix = NULL;
+    char *id_suffix = NULL;
 
     void *c = flag_c_new(program_name);
-    flag_c_list_var(c, &tags, "t", "Tags to add to the new task");
+    flag_c_list_var(c, &tags_from_flags, "t", "Tags to add to the new task");
     flag_c_uint64_var(c, &priority, "p", DEFAULT_PRIORITY, "Priority of the new task");
-    flag_c_str_var(c, &suffix, "s", NULL, "Task ID optional suffix");
+    flag_c_str_var(c, &id_suffix, "s", NULL, "Task ID optional suffix");
     flag_c_bool_var(c, &help, "help", false, "Print this help message");
     String_Builder sb_title = {0};
 
     if (!flag_c_parse(c, argc, argv)) {
-        print_command_usage(self, program_name, c);
+        print_command_usage(stderr, self, program_name, c);
         flag_c_print_error(c, stderr);
         return false;
     }
@@ -395,45 +662,65 @@ bool new_run(Command *self, const char *program_name, int argc, char **argv)
     }
 
     if (help) {
-        print_command_usage(self, program_name, c);
+        print_command_usage(stdout, self, program_name, c);
         return true;
     }
 
     char *dir_path = find_relative_tasks_directory();
     if (!dir_path) return false;
 
-    char *id = temp_new_huid(suffix);
-    const char *task_path = temp_sprintf("%s/%s", dir_path, id);
-    int exists = file_exists(task_path);
-    if (exists < 0) return false;
-    if (exists) {
-        nob_log(ERROR, "%s already exists. You are probably creating tasks too fast, or your time is broken", id);
-        return false;
-    }
-    if (!mkdir_if_not_exists(task_path)) return false;
     String_View title = SVLIT(DEFAULT_TASK_TITLE);
     if (sb_title.count > 0) {
         title = sb_to_sv(sb_title);
     }
 
-    Task task = {
-        .id       = id,
-        .title    = title,
-        .status   = SVLIT("OPEN"),
-        .priority = priority,
-    };
-
-    da_foreach(const char *, tag, &tags) {
-        parse_tags(&task.tags, sv_from_cstr(*tag));
+    Parsed_Tags parsed_tags = {0};
+    da_foreach(const char *, tags_cstr, &tags_from_flags) {
+        String_View unparsed_tags = sv_from_cstr(*tags_cstr);
+        String_View tag = {0};
+        while (unparsed_tags_next(&unparsed_tags, &tag)) {
+            da_append(&parsed_tags, tag);
+        }
     }
 
-    String_Builder sb_md_content = {0};
+    if (!create_new_task(dir_path, id_suffix, title, priority, parsed_tags)) return false;
 
-    append_task_md_content(&sb_md_content, task);
-    const char *task_md_path = temp_sprintf("%s/%s/TASK.md", dir_path, id);
-    if (!write_entire_file(task_md_path, sb_md_content.items, sb_md_content.count)) return false;
+    return true;
+}
 
-    print_task_report(dir_path, &task);
+bool id_run(Command *self, const char *program_name, int argc, char **argv)
+{
+    bool help = false;
+    void *c = flag_c_new(program_name);
+    flag_c_bool_var(c, &help, "help", false, "Print this help message");
+
+    if (!flag_c_parse(c, argc, argv)) {
+        print_command_usage(stderr, self, program_name, c);
+        flag_c_print_error(c, stderr);
+        return false;
+    }
+
+    argc = flag_c_rest_argc(c);
+    argv = flag_c_rest_argv(c);
+
+    if (help) {
+        print_command_usage(stdout, self, program_name, c);
+        return true;
+    }
+
+    Path dir_path = {0};
+    Path cwd_path = {0};
+    Path rel_path = {0};
+    String_Builder sb_path = {0};
+    if (!find_tasks_database(&dir_path))  return false;
+    if (!get_current_dir_path(&cwd_path)) return false;
+    path_relative(&rel_path, cwd_path, dir_path);
+    if (!(rel_path.count == 1 && sv_eq(da_last(&rel_path), SVLIT("..")))) {
+        fprintf(stderr, "ERROR: You must be inside of a specific task folder like %s/<HUID>/\n", path_render_cstr(&sb_path, rel_path));
+        return false;
+    }
+    const char *huid = temp_sv_to_cstr(da_last(&cwd_path));
+    printf("%s", huid);
     return true;
 }
 
@@ -450,7 +737,7 @@ bool find_run(Command *self, const char *program_name, int argc, char **argv)
 
     while (argc > 0) {
         if (!flag_c_parse(c, argc, argv)) {
-            print_command_usage(self, program_name, c);
+            print_command_usage(stderr, self, program_name, c);
             flag_c_print_error(c, stderr);
             return false;
         }
@@ -460,28 +747,28 @@ bool find_run(Command *self, const char *program_name, int argc, char **argv)
 
         if (argc > 0) {
             if (huid != NULL) {
-                print_command_usage(self, program_name, c);
-                nob_log(ERROR, "Several HUIDs is not supported");
+                print_command_usage(stderr, self, program_name, c);
+                fprintf(stderr, "ERROR: Several HUIDs is not supported\n");
                 return false;
             }
 
             huid = shift(argv, argc);
             if (!is_valid_huid(huid)) {
-                print_command_usage(self, program_name, c);
-                nob_log(ERROR, "`%s` is not a valid HUID. Valid HUID matches regexp %s", huid, HUID_REGEXP_FOR_USER_REPORT_PURPOSES);
+                print_command_usage(stderr, self, program_name, c);
+                fprintf(stderr, "ERROR: `%s` is not a valid HUID. Valid HUID matches regexp %s\n", huid, HUID_REGEXP_FOR_USER_REPORT_PURPOSES);
                 return false;
             }
         }
     }
 
     if (help) {
-        print_command_usage(self, program_name, c);
+        print_command_usage(stdout, self, program_name, c);
         return true;
     }
 
     if (huid == NULL) {
-        print_command_usage(self, program_name, c);
-        nob_log(ERROR, "No HUID was provided");
+        print_command_usage(stderr, self, program_name, c);
+        fprintf(stderr, "ERROR: No HUID was provided\n");
         return false;
     }
 
@@ -497,13 +784,13 @@ bool find_run(Command *self, const char *program_name, int argc, char **argv)
             if (path_only) {
                 printf("%s/%s/TASK.md\n", dir_path, task->id);
             } else {
-                print_task_report(dir_path, task);
+                print_task_report(dir_path, task, SVNULL);
             }
             found = true;
         }
     }
     if (!found) {
-        nob_log(ERROR, "No task with with HUID `%s` was found", huid);
+        fprintf(stderr, "ERROR: No task with with HUID `%s` was found\n", huid);
         return false;
     }
     return true;
@@ -523,7 +810,7 @@ bool ref_run(Command *self, const char *program_name, int argc, char **argv)
     flag_c_bool_var(c, &help, "help", false, "Print this help message");
 
     if (!flag_c_parse(c, argc, argv)) {
-        print_command_usage(self, program_name, c);
+        print_command_usage(stderr, self, program_name, c);
         flag_c_print_error(c, stderr);
         return false;
     }
@@ -532,7 +819,7 @@ bool ref_run(Command *self, const char *program_name, int argc, char **argv)
 
     while (argc > 0) {
         if (!flag_c_parse(c, argc, argv)) {
-            print_command_usage(self, program_name, c);
+            print_command_usage(stderr, self, program_name, c);
             flag_c_print_error(c, stderr);
             return false;
         }
@@ -542,22 +829,22 @@ bool ref_run(Command *self, const char *program_name, int argc, char **argv)
 
         if (argc > 0) {
             if (huid != NULL) {
-                print_command_usage(self, program_name, c);
-                nob_log(ERROR, "Several HUIDs is not supported");
+                print_command_usage(stderr, self, program_name, c);
+                fprintf(stderr, "ERROR: Several HUIDs is not supported\n");
                 return false;
             }
 
             huid = shift(argv, argc);
             if (!is_valid_huid(huid)) {
-                print_command_usage(self, program_name, c);
-                nob_log(ERROR, "`%s` is not a valid HUID. Valid HUID matches regexp %s", huid, HUID_REGEXP_FOR_USER_REPORT_PURPOSES);
+                print_command_usage(stderr, self, program_name, c);
+                fprintf(stderr, "ERROR: `%s` is not a valid HUID. Valid HUID matches regexp %s\n", huid, HUID_REGEXP_FOR_USER_REPORT_PURPOSES);
                 return false;
             }
         }
     }
 
     if (help) {
-        print_command_usage(self, program_name, c);
+        print_command_usage(stdout, self, program_name, c);
         return true;
     }
 
@@ -567,7 +854,7 @@ bool ref_run(Command *self, const char *program_name, int argc, char **argv)
 
     if (huid == NULL) {
         if (!(rel_path.count == 1 && sv_eq(da_last(&rel_path), SVLIT("..")))) {
-            nob_log(ERROR, "You are not inside any task folder. Pass the ID of a task as an argument to search for referers of that task.");
+            fprintf(stderr, "ERROR: You should be inside of a specific task folder like %s/<HUID>. Alternatively you can pass the <HUID> of the task as an argument to search for referers of that task.\n", path_render_cstr(&sb_path, rel_path));
             return false;
         }
         huid = temp_sv_to_cstr(da_last(&cwd_path));
@@ -593,13 +880,13 @@ bool graph_run(Command *self, const char *program_name, int argc, char **argv)
     flag_c_bool_var(c, &help, "help", false, "Print this help message");
 
     if (!flag_c_parse(c, argc, argv)) {
-        print_command_usage(self, program_name, c);
+        print_command_usage(stderr, self, program_name, c);
         flag_c_print_error(c, stderr);
         return false;
     }
 
     if (help) {
-        print_command_usage(self, program_name, c);
+        print_command_usage(stdout, self, program_name, c);
         return true;
     }
 
@@ -650,7 +937,7 @@ bool graph_run(Command *self, const char *program_name, int argc, char **argv)
     const char *dot_path = "graph.dot";
     const char *out_path = temp_sprintf("graph.%s", format);
     if (!write_entire_file(dot_path, sb.items, sb.count)) return false;
-    nob_log(INFO, "Generated %s", dot_path);
+    printf("Generated %s\n", dot_path);
 
     Cmd cmd = {0};
     // cmd_append(&cmd, "dot");
@@ -688,13 +975,13 @@ bool summary_run(Command *self, const char *program_name, int argc, char **argv)
     flag_c_bool_var(c, &help, "help", false, "Print this help message");
 
     if (!flag_c_parse(c, argc, argv)) {
-        print_command_usage(self, program_name, c);
+        print_command_usage(stderr, self, program_name, c);
         flag_c_print_error(c, stderr);
         return false;
     }
 
     if (help) {
-        print_command_usage(self, program_name, c);
+        print_command_usage(stdout, self, program_name, c);
         return true;
     }
 
@@ -741,15 +1028,17 @@ bool summary_run(Command *self, const char *program_name, int argc, char **argv)
     };
     for (size_t i = 0; i < tasks.count; ++i) {
         Task *task = &tasks.items[i];
-        bool task_is_closed = sv_eq(task->status, SVLIT("CLOSED"));
+        String_View status = task->status;
+        bool task_is_closed = sv_eq(status, SVLIT("CLOSED"));
         if (closed == task_is_closed) {
             total_count += 1;
-            for (size_t j = 0; j < task->tags.count; ++j) {
-                *ht_find_or_put(&tags_count, task->tags.items[j]) += 1;
+            bool untagged = true;
+            for (size_t i = 0; i < task->parsed_tags.count; ++i) {
+                String_View tag = task->parsed_tags.items[i];
+                *ht_find_or_put(&tags_count, tag) += 1;
+                untagged = false;
             }
-            if (task->tags.count == 0) {
-                untagged_count += 1;
-            }
+            if (untagged) untagged_count += 1;
         }
     }
 
@@ -800,10 +1089,24 @@ bool help_run(Command *self, const char *program_name, int argc, char **argv);
 
 bool version_run(Command *self, const char *program_name, int argc, char **argv)
 {
-    UNUSED(self);
-    UNUSED(program_name);
-    UNUSED(argc);
-    UNUSED(argv);
+    bool help = false;
+    void *c = flag_c_new(program_name);
+    flag_c_bool_var(c, &help, "help", false, "Print this help message");
+
+    if (!flag_c_parse(c, argc, argv)) {
+        print_command_usage(stderr, self, program_name, c);
+        flag_c_print_error(c, stderr);
+        return false;
+    }
+
+    argc = flag_c_rest_argc(c);
+    argv = flag_c_rest_argv(c);
+
+    if (help) {
+        print_command_usage(stdout, self, program_name, c);
+        return true;
+    }
+
 #ifdef GIT_HASH
     printf("tatr commit %s\n", GIT_HASH);
 #else
@@ -820,102 +1123,178 @@ bool version_run(Command *self, const char *program_name, int argc, char **argv)
 
 bool setup_run(Command *self, const char *program_name, int argc, char **argv);
 
+// IMPORTANT! Every commands must follow a convention where if you provide `-help` it should call print_command_usage().
+// This is important because `tatr help <COMMAND>` is a syntax sugar for `tatr <COMMAND> -help` and if the commands
+// don't follow this convention `tatr-help` will not work properly.
 Command commands[] = {
     {
         .name = "nvim-setup",
         .signature = "[OPTIONS]",
-        .description = "Install .nvim.lua and its .gitignore entry at a Git worktree root (requires Neovim exrc)",
+        .short_description = "Install .nvim.lua and its .gitignore entry at a Git worktree root (requires Neovim exrc).",
         .run = setup_run,
     },
     {
         .name = "skill-setup",
         .signature = "[OPTIONS]",
-        .description = "Install .agents/skills/tatr/SKILL.md and its .gitignore entry at a Git worktree root",
+        .short_description = "Install .agents/skills/tatr/SKILL.md and its .gitignore entry at a Git worktree root.",
         .run = setup_run,
     },
     {
         .name = "init",
-        .description = "Create tasks/ directory in the current working directory if it doesn't exist yet",
+        .signature = "[OPTIONS]",
+        .short_description = "Create tasks/ directory in the current working directory if it doesn't exist yet.",
         .run = init_run,
     },
     {
         .name = "ls",
         .signature = "[OPTIONS] [QUERY...]",
-        .description = "List the tasks",
+        .short_description = "List and update the tasks.",
         .run = ls_run,
     },
     {
         .name = "new",
         .signature = "[OPTIONS] [TITLE...]",
-        .description = "Create a new task",
+        .short_description = "Create a new task.",
         .run = new_run,
+    },
+    {
+        .name = "todo",
+        .signature = "[OPTIONS] <FILE...>",
+        .short_description = "Create tasks from all the TODOs in the provided files.",
+        .run = todo_run,
     },
     {
         .name = "summary",
         .signature = "[OPTIONS]",
-        .description = "Print the summary of the tasks",
+        .short_description = "Print the summary of the tasks.",
         .run = summary_run,
     },
     {
         .name = "find",
-        .signature = "<HUID> [OPTIONS]",
-        .description = "Find the task with a given HUID",
+        .signature = "[OPTIONS] <HUID>",
+        .short_description = "Find the task with a given HUID.",
+        .extra_description =
+            "Unlike `tatr ls <HUID>` this command finds the task regardless of whether it's closed or not.",
         .run = find_run,
     },
     {
+        .name = "id",
+        .signature = "[OPTIONS]",
+        .short_description = "Print the id of the current task folder to stdout.",
+        .extra_description = "On Linux you can do something like `tatr id | xclip` with this.",
+        .run = id_run,
+    },
+    {
         .name = "ref",
-        .signature = "[HUID]",
-        .description = "Finds referers of the task. Basically greps the Task ID over entirety of the repo. If ran inside of a task folder automatically picks up the ID of that task.",
+        .signature = "[OPTIONS] [HUID]",
+        .short_description = "Finds referers of the task.",
+        .extra_description = "Basically greps the Task ID over entirety of the repo. If ran inside of a task folder automatically picks up the ID of that task.",
         .run = ref_run,
     },
     {
         .name = "graph",
-        .description = "Generate graph of tasks cross-referring to each other. This command is largely useless right now.",
+        .signature = "[OPTIONS]",
+        .short_description = "Generate graph of tasks cross-referring to each other.",
+        .extra_description = "This command is largely useless right now.",
         .run = graph_run,
     },
     {
+        .name = "tag",
+        .short_description = "Tag all the tasks filtered by a query. DEPRECATED! Use `tatr ls -update +<tag> <query>` instead.",
+        .signature = "[OPTIONS] <QUERY>",
+        .run = tag_run,
+        .deprecated = true,
+    },
+    {
         .name = "untag",
-        .description = "Untag all the tasks filtered by a query",
-        .signature = "[OPTIONS] [QUERY]",
+        .short_description = "Untag all the tasks filtered by a query. DEPRECATED! Use `tatr ls -update -<tag> <query>` instead.",
+        .signature = "[OPTIONS] <QUERY>",
         .run = untag_run,
+        .deprecated = true,
     },
     {
         .name = "help",
-        .signature = "[OPTIONS]",
-        .description = "Print this help message",
+        .signature = "[OPTIONS] [COMMAND]",
+        .short_description = "Print this help message.",
         .run = help_run,
     },
     {
         .name = "version",
-        .description = "Print the current version and date of the build",
+        .signature = "[OPTIONS]",
+        .short_description = "Print the current version and date of the build.",
         .run =  version_run,
     },
 };
 
-void print_available_commands(Log_Level log_level)
+void print_available_commands(FILE *sink, const char *program_name, bool deprecated)
 {
-    nob_log(log_level, "Available commands:");
     int max_width = 0;
     for (size_t i = 0; i < ARRAY_LEN(commands); ++i) {
         int width = strlen(commands[i].name);
         if (width > max_width) max_width = width;
     }
+
+    fprintf(sink, "Available commands:\n");
     for (size_t i = 0; i < ARRAY_LEN(commands); ++i) {
-        nob_log(log_level, "    %-*s - %s", max_width, commands[i].name, commands[i].description);
+        if (commands[i].deprecated) continue;
+        fprintf(sink, "    %-*s - %s\n", max_width, commands[i].name, commands[i].short_description);
     }
+    fprintf(sink, "\n");
+    if (deprecated) {
+        fprintf(sink, "Deprecated commands:\n");
+        for (size_t i = 0; i < ARRAY_LEN(commands); ++i) {
+            if (!commands[i].deprecated) continue;
+            fprintf(sink, "    %-*s - %s\n", max_width, commands[i].name, commands[i].short_description);
+        }
+        fprintf(sink, "\n");
+    }
+    fprintf(sink, "Use `%s <COMMAND> -help` to learn more about a command.\n", program_name);
 }
 
 bool help_run(Command *self, const char *program_name, int argc, char **argv)
 {
-    UNUSED(self);
-    UNUSED(program_name);
-    UNUSED(argc);
-    UNUSED(argv);
-    // TASK(20260910-113917): Not sure why we use nob_log for reporting useful info to the user
-    nob_log(INFO, "tatr - Task Tracker");
-    nob_log(INFO, "Usage: %s <command> [OPTIONS]", program_name);
-    print_available_commands(INFO);
-    return true;
+    bool help = false;
+    bool deprecated = false;
+    void *c = flag_c_new(program_name);
+    flag_c_bool_var(c, &deprecated, "d", false, "Print deprecated commands");
+    flag_c_bool_var(c, &help, "help", false, "Print this help message");
+
+    if (!flag_c_parse(c, argc, argv)) {
+        print_command_usage(stderr, self, program_name, c);
+        flag_c_print_error(c, stderr);
+        return false;
+    }
+
+    argc = flag_c_rest_argc(c);
+    argv = flag_c_rest_argv(c);
+
+    if (help) {
+        print_command_usage(stdout, self, program_name, c);
+        return true;
+    }
+
+    if (argc <= 0) {
+        printf("tatr - Task Tracker\n");
+        printf("Usage: %s <command> [OPTIONS]\n", program_name);
+        printf("\n");
+        print_available_commands(stdout, program_name, deprecated);
+        return true;
+    }
+
+    const char *command_name = shift(argv, argc);
+
+    for (size_t i = 0; i < ARRAY_LEN(commands); ++i) {
+        if (strcmp(command_name, commands[i].name) == 0) {
+            char *help_flag = "-help";
+            if (!commands[i].run(&commands[i], program_name, 1, &help_flag)) return false;
+            return true;
+        }
+    }
+
+    print_available_commands(stderr, program_name, deprecated);
+    fprintf(stderr, "\n");
+    fprintf(stderr, "ERROR: Unknown command `%s`\n", command_name);
+    return false;
 }
 
 int main(int argc, char **argv)
@@ -924,8 +1303,9 @@ int main(int argc, char **argv)
     const char *program_name = shift(argv, argc);
 
     if (argc <= 0) {
-        print_available_commands(ERROR);
-        nob_log(ERROR, "No command is provided");
+        print_available_commands(stderr, program_name, false);
+        fprintf(stderr, "\n");
+        fprintf(stderr, "ERROR: No command is provided\n");
         return 0;
     }
 
@@ -938,8 +1318,9 @@ int main(int argc, char **argv)
         }
     }
 
-    print_available_commands(ERROR);
-    nob_log(ERROR, "Unknown command `%s`", command_name);
+    print_available_commands(stderr, program_name, false);
+    fprintf(stderr, "\n");
+    fprintf(stderr, "ERROR: Unknown command `%s`\n", command_name);
     return 1;
 #else // TASKS_TEST
     UNUSED(argc);
@@ -955,6 +1336,7 @@ int main(int argc, char **argv)
 #include "huid.c"
 #include "md.c"
 #include "query.c"
+#include "update.c"
 #include "task.c"
 #include "setup.c"
 

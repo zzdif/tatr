@@ -15,28 +15,35 @@
 #ifndef TASK_H_
 #define TASK_H_
 
+bool unparsed_tags_next(String_View *unparsed_tags, String_View *tag);
+bool unparsed_tags_contains(String_View unparsed_tags, String_View tag);
+bool unparsed_tags_empty(String_View unparsed_tags);
+
 typedef struct {
     String_View *items;
     size_t count;
     size_t capacity;
-} Tags;
+} Parsed_Tags;
 
-void parse_tags(Tags *tags, String_View sv);
-bool tags_contains(Tags tags, String_View tag);
+void parse_tags(Parsed_Tags *parsed_tags, String_View unparsed_tags);
+void unparse_tags(Parsed_Tags parsed_tags, String_Builder *unparsed_tags);
+bool parsed_tags_contains(Parsed_Tags parsed_tags, String_View tag);
 
 typedef struct {
     char *id;
     String_View title;
     String_View status;
-    Tags tags;
     int priority;
+    Parsed_Tags parsed_tags;
     Properties properties;
     String_View body;
     String_View task_md_content;
 } Task;
 
-void print_task_report(const char *rel_path, Task *task);
+void print_task_report(const char *rel_path, Task *task, String_View updated);
+void print_task_tags_update_report(const char *rel_path, int tags_property_line, Task task, String_View old_unparsed_tags);
 void append_task_md_content(String_Builder *sb, Task task);
+void render_task_md(Task task, String_Builder *sb, int *tags_property_line);
 
 typedef struct {
     Task *items;
