@@ -84,8 +84,18 @@ bool load_tasks(Tasks *tasks, const char *dir_path)
         String_Builder sb_content = {0};
         const char *task_md_path = temp_sprintf("%s/%s/TASK.md", dir_path, id);
         // TASK(20260308-171346): there should be a command that reports all the skipped weird folders and files found in the tasks/ folder
-        if (!file_exists(task_md_path)) continue;
-        if (!read_entire_file(task_md_path, &sb_content)) return_defer(false);
+        if (scheduler_store.path) {
+            char *raw = NULL; size_t len = 0; struct stat st;
+            if (!store_read(&scheduler_store, id, &raw, &len, &st)) {
+                fprintf(stderr, "ERROR: %s: %s (%s)\n", scheduler_store.code, scheduler_store.error, id);
+                return_defer(false);
+            }
+            da_append_many(&sb_content, raw, len);
+            free(raw);
+        } else {
+            if (!file_exists(task_md_path)) continue;
+            if (!read_entire_file(task_md_path, &sb_content)) return_defer(false);
+        }
         sb_append_null(&sb_content);
 
         Task task = {
@@ -137,7 +147,7 @@ int task_compare_priority_reverse(const void *a, const void *b)
 {
     const Task *ta = a;
     const Task *tb = b;
-    return tb->priority - ta->priority;
+    return (tb->priority > ta->priority) - (tb->priority < ta->priority);
 }
 
 Task_Compare task_sorter(bool by_id)
@@ -153,7 +163,7 @@ Task_Compare task_sorter(bool by_id)
 
 bool unparsed_tags_next(String_View *unparsed_tags, String_View *tag)
 {
-    while (unparsed_tags->count && (isspace(*unparsed_tags->data) || *unparsed_tags->data == ',')) {
+    while (unparsed_tags->count && (isspace((unsigned char)*unparsed_tags->data) || *unparsed_tags->data == ',')) {
         sv_chop_left(unparsed_tags, 1);
     }
     if (unparsed_tags->count == 0) {
@@ -161,7 +171,7 @@ bool unparsed_tags_next(String_View *unparsed_tags, String_View *tag)
         return false;
     }
     const char *start = unparsed_tags->data;
-    while (unparsed_tags->count && !(isspace(*unparsed_tags->data) || *unparsed_tags->data == ',')) {
+    while (unparsed_tags->count && !(isspace((unsigned char)*unparsed_tags->data) || *unparsed_tags->data == ',')) {
         sv_chop_left(unparsed_tags, 1);
     }
     *tag = sv_from_parts(start, unparsed_tags->data - start);

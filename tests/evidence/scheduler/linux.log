@@ -1,0 +1,124 @@
+Linux 7ebc4386ab9c 6.8.0-64-generic #67-Ubuntu SMP PREEMPT_DYNAMIC Sun Jun 15 20:23:40 UTC 2025 aarch64 GNU/Linux
+cc (GCC) 14.3.0
+Copyright (C) 2024 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+Python 3.11.2
+[INFO] created directory `build/`
+[INFO] CMD: git status --porcelain
+fatal: not a git repository (or any parent up to mount point /)
+Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).
+[ERROR] command exited with exit code 128
+[WARNING] git hash will not be included in `tatr-version`
+[INFO] CMD: cc --version
+[INFO] Generated build/build.h
+[INFO] CMD: cc -Wall -Wextra -Wswitch-enum -Wno-unused-function -Ithirdparty/ -Ibuild/ -ggdb -o build/tatr src/tatr.c
+[INFO] CMD: cc -Wall -Wextra -Wswitch-enum -Wno-unused-function -Ithirdparty/ -Ibuild/ -ggdb -DTASKS_TEST -o build/tatr-test src/tatr.c
+[INFO] CMD: build/tatr-test
+test_path_normalize ... OK
+test_path_parse_and_render ... OK
+test_path_relative ... OK
+[INFO] Running test_ls_query_negation_of_complex_expression_in_parens...
+[INFO] OK
+[INFO] Running test_ls_query_not_stuck_to_open_paren...
+[INFO] OK
+[INFO] Running test_ls_query_report_error_utf8...
+[INFO] OK
+[INFO] Running test_ls_query_priority_above_20...
+[INFO] OK
+[INFO] created directory `build/test/`
+[INFO] CMD: ../tatr init
+[INFO] created directory `./tasks/`
+[INFO] CMD: ../tatr new -p 69 -t foo,bar,baz 'Sanity check task'
+[INFO] deleting build/test//tasks/20261021-130758/TASK.md
+[INFO] deleting build/test//tasks/20261021-130758
+[INFO] deleting build/test//tasks/README.md
+[INFO] deleting build/test//tasks
+[INFO] deleting build/test//stdout.txt
+[INFO] deleting build/test/
+[INFO] created directory `build/test/`
+[INFO] CMD: ../tatr init
+[INFO] created directory `./tasks/`
+[INFO] CMD: ../tatr ls -id
+[INFO] CMD: ../tatr todo ./todos
+[INFO] CMD: ../tatr ls -id
+[INFO] deleting build/test//todos
+[INFO] deleting build/test//stdin.txt
+[INFO] deleting build/test//tasks/20261021-130759/TASK.md
+[INFO] deleting build/test//tasks/20261021-130759
+[INFO] deleting build/test//tasks/20261021-130758/TASK.md
+[INFO] deleting build/test//tasks/20261021-130758
+[INFO] deleting build/test//tasks/README.md
+[INFO] deleting build/test//tasks
+[INFO] deleting build/test//stdout.txt
+[INFO] deleting build/test/
+[INFO] created directory `build/test/`
+[INFO] CMD: ../tatr init
+[INFO] created directory `./tasks/`
+[INFO] created directory `tasks/20261021-130759`
+[INFO] CMD: ../tatr ls -update +aboba any
+[INFO] CMD: sh tests/setup.sh build/tatr
+PASS: Git-root gate, linked worktrees, skill setup, idempotence, conflicts, links, missing Neovim
+SKIP: Neovim integration tests (nvim not installed)
+[INFO] CMD: cc -Wall -Wextra -Wswitch-enum -Wno-unused-function -Ithirdparty/ -Ibuild/ -ggdb -o build/hash-test tests/hash.c thirdparty/sha256.c
+[INFO] CMD: build/hash-test
+PASS: RFC SHA-256 empty, abc, 56-byte padding boundary, million-a vectors and fingerprint prefix
+[INFO] CMD: cc -Wall -Wextra -Wswitch-enum -Wno-unused-function -Ithirdparty/ -Ibuild/ -ggdb -DSTORE_TESTING -o build/store-test tests/store.c src/store.c
+[INFO] CMD: build/store-test
+PASS: store API, locks, stale writes, symlinks, hardlinks, permissions, restrictive umask, kernel-induced creation IO failure cleanup
+PASS: A18 injected pre-rename failure preserves bytes/cleans owned temp; post-rename error reports committed and fresh read reconciles
+[INFO] CMD: cc -Wall -Wextra -Wswitch-enum -Wno-unused-function -Ithirdparty/ -Ibuild/ -ggdb -DSTORE_TESTING -DTASKS_TEST_FIXED_TIME=0 -DSTORE_TEST_FAILURE=1 -o build/tatr-failure-1 src/tatr.c
+[INFO] CMD: cc -Wall -Wextra -Wswitch-enum -Wno-unused-function -Ithirdparty/ -Ibuild/ -ggdb -DSTORE_TESTING -DTASKS_TEST_FIXED_TIME=0 -DSTORE_TEST_FAILURE=2 -o build/tatr-failure-2 src/tatr.c
+[INFO] CMD: cc -Wall -Wextra -Wswitch-enum -Wno-unused-function -Ithirdparty/ -Ibuild/ -ggdb -DSTORE_TESTING -DTASKS_TEST_FIXED_TIME=0 -DSTORE_TEST_FAILURE=3 -o build/tatr-failure-3 src/tatr.c
+[INFO] CMD: python3 tests/scheduler.py build/tatr build/tatr-failure-1 build/tatr-failure-2 build/tatr-failure-3
+PASS 01 A02/A06/A07/A11/A15 explicit spaced database, scoped legacy tolerance, frontier, read-only metadata
+PASS 02 A03/A04 Unicode/control escaping, exact parser body, independent hashlib raw-byte oracle
+PASS 03 A07/A09/A10 diamond release, completion, reopening invalidates closed-DONE descendants
+PASS 04 A08/A09 cross-spec prerequisite explanation, cancelled and legacy closure do not satisfy
+PASS 05 A20 scope snapshot tracks membership but excludes unrelated record edits
+PASS 06 A13/A14 stale token preserves bytes, typed no-op preserves mtime, unknown fields/body/attachments survive
+PASS 07 A05/A08/A13 contradictory outcome, cycle and container dependency rejected before mutation
+PASS 08 A05/A11/A12 strict integer grammar, duplicates, near-matches, invalid edges; draft dangling reads vs graph failure
+PASS 09 A15 held exclusive lock blocks reads; shared locks allow reads but block mutations, without lock artifacts
+PASS 10 A02/A17 nonexistent explicit DB never falls back; symlink DB/TASK, hardlink, FIFO rejected
+PASS 11 A03/A16 new real record/fingerprint, signed priority, exact body payload; injection/suffix rejection
+PASS 12 A06/A10 empty is not complete; incomplete or NUL-unclassifiable records cannot disappear from discovery
+PASS 13 A14 real simultaneous CLI writers, pipe barrier, exactly one successful update; stale replay conflicts
+PASS 14 A19 legacy reopen clears DONE; close does not invent it; tag changes preserve relationships
+PASS 15 A15 pipe-coordinated raw reader sees only complete 32KB old/new files across six real CLI replacements
+PASS 16 A18 pipe barrier forces broken output after commit; nonzero exit and committed diagnostic require fresh-read reconciliation
+PASS 17 A02/A04/A06 CRLF raw hash, scoped unrelated-header tolerance, independent creation, canonical parent paths
+PASS 18 A01/A03/A11 JSON empty arrays, default/closed/TQL selection, full stable sort reversal; legacy text/path-only
+PASS 19 A09/A11 closed root does not complete children; ready priority ties are HUID ordered
+PASS 20 A18 black-box injected pre/post-rename failures, JSON write_state, exact bytes, cleanup and fresh-read reconciliation
+PASS 21 A08/A13/A16 deterministic generated ID cannot activate a draft container/dependency violation
+PASS 22 A19 injected second bulk replacement failure identifies committed first ID/failed ID; untouched remainder and no blind rollback
+PASS 23 A03/A12/A16 invalid UTF-8/NUL records, malformed/duplicate/injected properties rejected without publication
+PASS 24 A03 help needs no database, forbidden JSON combinations yield one error object
+24 scheduler contract groups passed on linux
+PASS 01 A02/A06/A07/A11/A15 explicit spaced database, scoped legacy tolerance, frontier, read-only metadata
+PASS 02 A03/A04 Unicode/control escaping, exact parser body, independent hashlib raw-byte oracle
+PASS 03 A07/A09/A10 diamond release, completion, reopening invalidates closed-DONE descendants
+PASS 04 A08/A09 cross-spec prerequisite explanation, cancelled and legacy closure do not satisfy
+PASS 05 A20 scope snapshot tracks membership but excludes unrelated record edits
+PASS 06 A13/A14 stale token preserves bytes, typed no-op preserves mtime, unknown fields/body/attachments survive
+PASS 07 A05/A08/A13 contradictory outcome, cycle and container dependency rejected before mutation
+PASS 08 A05/A11/A12 strict integer grammar, duplicates, near-matches, invalid edges; draft dangling reads vs graph failure
+PASS 09 A15 held exclusive lock blocks reads; shared locks allow reads but block mutations, without lock artifacts
+PASS 10 A02/A17 nonexistent explicit DB never falls back; symlink DB/TASK, hardlink, FIFO rejected
+PASS 11 A03/A16 new real record/fingerprint, signed priority, exact body payload; injection/suffix rejection
+PASS 12 A06/A10 empty is not complete; incomplete or NUL-unclassifiable records cannot disappear from discovery
+PASS 13 A14 real simultaneous CLI writers, pipe barrier, exactly one successful update; stale replay conflicts
+PASS 14 A19 legacy reopen clears DONE; close does not invent it; tag changes preserve relationships
+PASS 15 A15 pipe-coordinated raw reader sees only complete 32KB old/new files across six real CLI replacements
+PASS 16 A18 pipe barrier forces broken output after commit; nonzero exit and committed diagnostic require fresh-read reconciliation
+PASS 17 A02/A04/A06 CRLF raw hash, scoped unrelated-header tolerance, independent creation, canonical parent paths
+PASS 18 A01/A03/A11 JSON empty arrays, default/closed/TQL selection, full stable sort reversal; legacy text/path-only
+PASS 19 A09/A11 closed root does not complete children; ready priority ties are HUID ordered
+PASS 20 A03/A12/A16 invalid UTF-8/NUL records, malformed/duplicate/injected properties rejected without publication
+PASS 21 A03 help needs no database, forbidden JSON combinations yield one error object
+21 scheduler contract groups passed on linux
+PASS: store API, locks, stale writes, symlinks, hardlinks, permissions, restrictive umask, kernel-induced creation IO failure cleanup
+PASS: A18 injected pre-rename failure preserves bytes/cleans owned temp; post-rename error reports committed and fresh read reconciles
+PASS: RFC SHA-256 empty, abc, 56-byte padding boundary, million-a vectors and fingerprint prefix

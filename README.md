@@ -65,13 +65,13 @@ Use [git-blame](https://git-scm.com/docs/git-blame) and [git-log](https://git-sc
 
 #### Task Properties
 
-The `STATUS` property defines whether the task is done or not. There could be only two statuses. If you need more it is generally recommended to use `TAGS` for whatever you are trying to do.
+The `STATUS` property defines whether the task is open or closed. For scheduler use, closure alone is not successful completion: see `RESOLUTION` below. There could be only two statuses. If you need more it is generally recommended to use `TAGS` for whatever you are trying to do.
 
 The `PRIORITY` is generally used for sorting the tasks by the external tools. One thing I've seen people online do is stressing out about what priority to put. Don't think of priority as an absolute value. Think of it as the means of getting your list of tasks sorted in a specific way you want them to see.
 
 The `TAGS` property contains the list of tags separated by commas and whitespaces. `TAGS: foo,bar,baz` defines 3 tags. `TAGS: foo,,, hello  world` also defines 3 tags. You can use these tags to group tasks into categories. Like `bug` or `enhancement`.
 
-We allow to specify `[other properties]` (in addition to `STATUS`, `PRIORITY`, and `TAGS`) in a similar format (that is `- [NAME]: [VALUE]`), the official tool will ignore them but try its best to not disturb them too much during any mass update operations (like `tatr-untag`, etc).
+We allow to specify `[other properties]` (in addition to `STATUS`, `PRIORITY`, `TAGS`, and the scheduler metadata described below) in a similar format (that is `- [NAME]: [VALUE]`), the official tool will ignore them but try its best to not disturb them too much during any mass update operations (like `tatr-untag`, etc).
 
 Duplicated properties are not allowed. If a tasks specifies duplicated properties only the last value must be taken into account. Mass update operations of the official tool will remove any duplicated properties.
 
@@ -101,7 +101,7 @@ $ tatr help
 
 It is optimized for Emacs compilation mode, but its `path:line:message` task reports also work with Vim and Neovim's built-in quickfix list (see below).
 
-We only support Linux right now But I have tasks to add [Windows](./tasks/20260825-170729/TASK.md) and [MacOS](./tasks/20260901-063204/TASK.md) support in the future.
+The native scheduler interface is tested on local-filesystem Linux and macOS (see [verification evidence](tests/scheduler-verification.md)); this is not a Windows or network-filesystem guarantee. Historical portability tasks include [Windows](./tasks/20260825-170729/TASK.md) and [MacOS](./tasks/20260901-063204/TASK.md) support in the future.
 
 You are welcome to make your own tools.
 
@@ -293,6 +293,187 @@ Above command closes all the tasks with tag `bug` and removes the `scope` tag fr
 |`-tag`| Remove tag from the task |
 |`close`| Close the task |
 |`open`| Open the task |
+
+## Native scheduler interface
+
+`tatr` owns task facts and dependency eligibility, **not** worker scheduling, claims, review,
+Git integration, tests, or deployment. `ready` is read-only and does not authorize work.
+An external controller must exclude in-flight tasks, obtain approvals, verify integration,
+and reconcile inputs before recording outcomes.
+
+### Commands
+
+All options precede positional IDs/title/query. `-db DIR` means the **tasks directory
+itself**, relative to process cwd or absolute. Explicit invalid paths never fall back
+or initialize a database. Spaces are supported. Symlink path components are refused;
+use an ordinary physical checkout path, not a symlink alias.
+
+```text
+ls    [-db DIR] -json [-c] [-id] [-a] [TQL...]
+find  [-db DIR] -json HUID
+new   [-db DIR] [-json] [-t TAG]... [-p N] [-s SUFFIX]
+      [-property KEY=VALUE]... [-body-file FILE] [TITLE...]
+set   -db DIR [-json] -expect FINGERPRINT -property KEY=VALUE [...] HUID
+check -db DIR [-json] -spec HUID
+ready -db DIR [-json] -spec HUID
+```
+
+`ls`, `find`, and `new` retain upward discovery without `-db`; automation should always
+pass it. Text `ls -update` and `todo` also accept `-db`. Existing text reports/TQL/TUL
+are retained. `ls -json` is read-only and rejects `-update`/`-debug`; `find -json`
+rejects `-path-only`. `help COMMAND` and `COMMAND -help` need no database.
+There are no global pre-command flags; do not rely on conventional `--` handling.
+
+`new` defaults to `New Task`, `OPEN`, priority 100; `-p` accepts signed 32-bit decimal
+integers. Generation suffixes must be nonempty ASCII `[A-Za-z0-9-]+` (at most 239 bytes, so the full ID fits a 255-byte native filename component). Titles must be
+single UTF-8 lines. Creation properties cannot override STATUS/PRIORITY/TAGS; use the
+established flags/defaults. The optional regular UTF-8 body file is data, not CLI or
+header input; its payload follows one inserted header/body separator newline.
+
+`set` requires a fresh raw-content fingerprint and at least one property. Split property
+arguments at the first `=`; keys are ASCII alphanumeric, unique per request. NUL/CR/LF
+in arguments are forbidden. Unknown compatible keys are retained. Empty values clear
+optional meanings; STATUS/PRIORITY cannot be empty. No title/body-editing API is added.
+Reopening with STATUS=OPEN clears an old resolution. Explicit OPEN plus a nonempty
+resolution is invalid. STATUS=CLOSED alone never invents DONE.
+
+### Relationships and outcomes
+
+Only exact uppercase contiguous header keys are authoritative:
+
+| Key | Meaning |
+| --- | --- |
+| `SPEC` | Optional existing same-database HUID identifying a grouping root |
+| `DEPENDS` | Optional comma-separated existing same-database HUIDs; whitespace trimmed; no empty elements, duplicates, self-edges, or cycles |
+| `RESOLUTION` | Absent/empty, `DONE`, or `CANCELLED` |
+
+A selected spec's direct SPEC children are candidates. Dependencies can cross specs,
+but external prerequisites are never automatically scheduled. Spec containers cannot
+be candidates, have dependencies, be dependency targets, or belong to another spec.
+A container is the selected root or a record named by a syntactically valid SPEC header.
+Prose references and the old Graphviz graph are not dependency edges.
+
+Only CLOSED + DONE **with every dependency recursively satisfied** fulfills a prerequisite.
+CANCELLED and unspecified legacy closures block dependents. Reopening an upstream task
+also invalidates closed-DONE downstream satisfaction. Do not auto-migrate legacy closures.
+The controller records DONE only after its required integration/validation; tatr does
+not independently prove that assertion.
+
+JSON reads strictly validate selected records: explicit OPEN/CLOSED STATUS, signed
+32-bit decimal PRIORITY (`-?[0-9]+`, surrounding whitespace trimmed), no duplicate
+header keys, valid UTF-8 without NUL, and valid relationship syntax. Case variants and
+malformed scheduling keys are errors. CRLF headers are accepted; fingerprints preserve
+raw line endings. Text mode retains legacy defaults. JSON ls/find permit syntactically
+valid dangling references as draft data; check/ready and relationship writes resolve
+references and reject cycles. Scoped checks tolerate unrelated identifiable legacy
+records, but cannot ignore unsafe/unreadable/unclassifiable HUID directories or missing
+TASK.md files when discovering membership. Reads do not repair or migrate records.
+
+### JSON v1
+
+JSON commands emit exactly one UTF-8 object plus newline. Successful commands leave
+stderr empty. The envelope is:
+
+```json
+{"schema_version":1,"command":"find","database":"/absolute/project/tasks","ok":true,"data":{"task":{}},"diagnostics":[]}
+```
+
+`find`/`new`/`set` use `data.task`; `ls` uses `data.tasks`. Task records contain `id`,
+relative `path`, `title`, the parser's original `body` slice, `status`, integer `priority`,
+`tags`, nullable `spec`/`resolution`, sorted `depends`, actual header `properties`, and
+`fingerprint`. Tags preserve semantic order. JSON lists retain the legacy primary sort
+and add ascending HUID priority ties; `-a` reverses the entire order.
+
+`check` returns `spec`, `snapshot`, and inspected `tasks` in ascending HUID order.
+`ready` additionally returns:
+
+- `ready`: records ordered by priority descending, HUID ascending.
+- `blocked`: open or closed-DONE selected tasks with unsatisfied prerequisites; each
+  entry has `id`, `status`, and `prerequisites` containing `id`, `reason`, `external`.
+  Reasons are `open`, `cancelled`, `unspecified_closure`, `recursively_unsatisfied`.
+- `unresolved`: closed selected tasks with `cancelled` or `unspecified_closure` reasons.
+- `state`: `ready` if any candidate is eligible; `complete` only if at least one child
+  exists and all are recursively satisfied; `empty` for no children; otherwise `blocked`.
+
+Blocked/inconsistent records remain visible even when another child is ready. For
+recursive blocking, follow declared dependencies through the returned inspected records.
+Human check/ready output concisely reports validity/state, ready/child counts and snapshot;
+use JSON for complete blocking details.
+
+Errors have `ok:false`, `data:null`, and diagnostics with `code`, `message`, and optional
+`task_id`, `cycle`, or `write_state`. Codes: `invalid_arguments`, `database_not_found`,
+`unsafe_path`, `task_not_found`, `invalid_task`, `invalid_relationship`, `missing_dependency`,
+`dependency_cycle`, `conflict`, `busy`, `io_error`. Exit 0 includes valid blocked/empty
+results; all errors exit 1. A broken stdout cannot carry a reliable JSON envelope:
+output failure instead exits nonzero with a bounded stderr diagnostic; after any write,
+read/reconcile before retrying.
+
+Fingerprints are `sha256:` plus SHA-256 of raw TASK.md bytes, including all whitespace,
+line endings and final newline. The native RFC 6234-derived implementation and its BSD
+license are in `thirdparty/sha256.c`. A scope snapshot hashes the ASCII-HUID-sorted UTF-8
+concatenation `id + " " + fingerprint + "\n"` for every inspected record, including
+root, selected children, dependency closure and referenced grouping roots. It is an
+observation, not a reservation, signature, or cross-file compare-and-swap.
+
+### Mutation guarantees and recovery
+
+All cooperating ls/find/check/ready reads hold a shared directory-fd advisory lock;
+new/set/ls-update/todo task writes hold an exclusive lock before loading mutable state.
+Contention fails promptly with `busy`. Reads create no lock file or other artifact.
+Locks cover the same physical database only, not separate worktree copies or hosts.
+Interactive `todo` holds its mutation lock while prompting; other commands fail promptly
+with `busy` until it finishes or exits.
+
+Task files must be ordinary singly-linked regular files. Creation exclusively reserves
+a new task directory and never owns an existing directory. Collisions have one bounded
+one-second generation retry. Replacement writes/flushed/closes a unique same-directory
+temporary file, preserves existing permission bits, rechecks target identity/content,
+then atomically renames and syncs the containing directory. Effective no-op assignments
+preserve exact original bytes, fingerprint and mtime. Attachments are untouched.
+
+A stale `-expect` or observed edit is a conflict, never an automatic retry. Handled
+pre-rename failures preserve the original and remove only owned temporary files.
+Post-rename sync errors report `io_error` with `write_state: "committed"`; **fresh read
+and reconciliation are mandatory before retrying**. There is no blind rollback.
+Interrupted creation may leave an incomplete reserved directory for human inspection;
+strict discovery reports it instead of deleting or ignoring it.
+
+Bulk updates are not whole-database transactions: query selection is preflighted, each
+replacement is protected, and an I/O failure identifies the failed ID and preceding
+UPDATED rows identify completed IDs. `todo` source rewriting remains outside the task
+transaction; a source error can leave an already-created task and a partially rewritten
+source file. Inspect both before retrying.
+
+Quiescent human editors are required for unattended mutation. Noncooperating edits
+between final validation and rename remain outside the guarantee; neither advisory
+locks nor hashes can stop them. There is no hostile same-user isolation, Windows,
+network-filesystem, distributed locking, or tested power-loss guarantee.
+
+### Inert controller example
+
+The following is a sequence to adapt **only in an approved disposable database**, not
+real tickets or a worker-launch script. Substitute actual returned IDs/tokens; angle
+brackets are placeholders, not shell arguments:
+
+```text
+new -db <tasks-dir> -json Approved spec
+new -db <tasks-dir> -json -property SPEC=<returned-spec-id> First change
+new -db <tasks-dir> -json -property SPEC=<returned-spec-id> Second change
+set -db <tasks-dir> -json -expect <second-token> -property DEPENDS=<first-id> <second-id>
+check -db <tasks-dir> -json -spec <spec-id>
+ready -db <tasks-dir> -json -spec <spec-id>
+# Controller obtains approvals, performs work, reviews and verifies integration.
+set -db <tasks-dir> -json -expect <fresh-first-token> -property STATUS=CLOSED -property RESOLUTION=DONE <first-id>
+ready -db <tasks-dir> -json -spec <spec-id>
+```
+
+Prepend the trusted tatr executable to each line. Only the first child is initially
+eligible; after verified DONE, the second becomes eligible. The controller—not tatr—
+owns all worker, worktree, approval, evidence and GitHub PR operations.
+
+`./nob -test` runs existing tests, native SHA/store tests and disposable black-box tests
+(`python3` is a **test-only** requirement). See [verification evidence](tests/scheduler-verification.md)
+for actual platforms, reproducible commands, acceptance coverage and explicit gaps.
 
 ## The License
 

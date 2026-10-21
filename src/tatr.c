@@ -26,6 +26,14 @@
 #include "build.h"
 
 #include <inttypes.h>
+#include "store.h"
+static Store scheduler_store = {.fd = -1};
+static bool scheduler_explicit;
+struct Command;
+static bool scheduler_dispatch(struct Command *self, const char *program, int argc, char **argv);
+static bool scheduler_run(struct Command *self, const char *program, int argc, char **argv);
+static char *scheduler_create_legacy(const char *, const char *, String_View, int, Parsed_Tags);
+static bool scheduler_legacy_replace(Task *, const char *, const void *, size_t);
 
 #define DEFAULT_TASK_TITLE "New Task"
 #define DEFAULT_PRIORITY 100
@@ -64,6 +72,7 @@ defer:
 
 char *find_relative_tasks_directory(void)
 {
+    if (scheduler_explicit && scheduler_store.path) return strdup(scheduler_store.path);
     char *result = NULL;
 
     Path dir_path = {0};
@@ -377,7 +386,7 @@ bool ls_run(Command *self, const char *program_name, int argc, char **argv)
 
     Tasks tasks = {0};
     if (!load_tasks(&tasks, dir_path)) return false;
-    qsort(tasks.items, tasks.count, sizeof(*tasks.items), task_sorter(by_id));
+    if (tasks.count > 1) qsort(tasks.items, tasks.count, sizeof(*tasks.items), task_sorter(by_id));
     if (ascending) {
         for (size_t i = 0; i < tasks.count/2; ++i) {
             size_t j = tasks.count - 1 - i;
@@ -389,6 +398,11 @@ bool ls_run(Command *self, const char *program_name, int argc, char **argv)
 
     Stack stack = {0};
 
+    // Query errors must be discovered before the first replacement in a bulk update.
+    if (update.count) da_foreach(Task, task, &tasks) {
+        if (closed ? !sv_eq(task->status, SVLIT("CLOSED")) : sv_eq(task->status, SVLIT("CLOSED"))) continue;
+        if (task_matches_query(original_query_src, *task, query, &stack) == QUERY_ERROR) return false;
+    }
     size_t tasks_matched = 0;
     size_t tasks_updated = 0;
     da_foreach(Task, task, &tasks) {
@@ -409,8 +423,10 @@ bool ls_run(Command *self, const char *program_name, int argc, char **argv)
             String_View update_src = sv_trim(sb_to_sv(sb_updates_src));
             String_Builder task_md_content = {0};
             render_task_md(*task, &task_md_content, NULL);
-            const char *task_md_path = temp_sprintf("%s/%s/TASK.md", dir_path, task->id);
-            if (!write_entire_file(task_md_path, task_md_content.items, task_md_content.count)) return false;
+            if (!scheduler_legacy_replace(task, dir_path, task_md_content.items, task_md_content.count)) {
+                fprintf(stderr, "ERROR: bulk update stopped at %s after %zu replacements; earlier UPDATED rows identify completed IDs\n", task->id, tasks_updated);
+                return false;
+            }
             print_task_report(dir_path, task, update_src);
             tasks_updated += 1;
         } else {
@@ -435,41 +451,7 @@ bool ls_run(Command *self, const char *program_name, int argc, char **argv)
 
 char *create_new_task(const char *dir_path, const char *id_suffix, String_View title, int priority, Parsed_Tags parsed_tags)
 {
-    char *id = temp_new_huid(id_suffix);
-    char *task_path = temp_sprintf("%s/%s", dir_path, id);
-    if (file_exists(task_path)) {
-        // We hit an already existing HUID. Let's try to wait 1 second to acquire the next one.
-        sleep(1);
-        id = temp_new_huid(id_suffix);
-        task_path = temp_sprintf("%s/%s", dir_path, id);
-        if (file_exists(task_path)) {
-            // We still hit an existing HUID even afte waiting for 1 second.
-            // Something is wrong with the environment. Better report an error.
-            fprintf(stderr, "ERROR: %s already exists. You are probably creating tasks too fast, or your time is broken\n", id);
-            return NULL;
-        }
-    }
-    if (!mkdir_if_not_exists(task_path)) return NULL;
-
-    Task task = {
-        .id          = id,
-        .title       = title,
-        .status      = SVLIT("OPEN"),
-        .priority    = priority,
-        .parsed_tags = parsed_tags
-    };
-
-    properties_put(&task.properties, SVLIT("STATUS"), SVNULL);
-    properties_put(&task.properties, SVLIT("PRIORITY"), SVNULL);
-    properties_put(&task.properties, SVLIT("TAGS"), SVNULL);
-
-    String_Builder sb_md_content = {0};
-
-    render_task_md(task, &sb_md_content, NULL);
-    const char *task_md_path = temp_sprintf("%s/%s/TASK.md", dir_path, id);
-    if (!write_entire_file(task_md_path, sb_md_content.items, sb_md_content.count)) return NULL;
-    print_task_report(dir_path, &task, SVNULL);
-    return id;
+    return scheduler_create_legacy(dir_path, id_suffix, title, priority, parsed_tags);
 }
 
 typedef struct {
@@ -519,9 +501,11 @@ void lines_concat(Lines lines, String_Builder *sb, String_View sep)
 bool todo_run(Command *self, const char *program_name, int argc, char **argv)
 {
     char *id_suffix = NULL;
+    char *db_flag = NULL;
     bool help = false;
 
     void *c = flag_c_new(program_name);
+    flag_c_str_var(c, &db_flag, "db", NULL, "Explicit tasks directory");
     flag_c_str_var(c, &id_suffix, "s", NULL, "Task ID optional suffix");
     flag_c_bool_var(c, &help, "help", false, "Print this help message");
 
@@ -625,66 +609,12 @@ bool todo_run(Command *self, const char *program_name, int argc, char **argv)
             sb_output.count = 0;
             lines_concat(lines, &sb_output, SVLIT("\n"));
             if (!write_entire_file(file_path, sb_output.items, sb_output.count)) {
+                fprintf(stderr, "ERROR: task %s was created but source rewrite failed at %s; inspect both before retrying\n", id, file_path);
                 return false;
             }
         }
 no_entire_file: {}
     }
-    return true;
-}
-
-bool new_run(Command *self, const char *program_name, int argc, char **argv)
-{
-    Flag_List tags_from_flags = {0};
-    bool help = false;
-    uint64_t priority = 0;
-    char *id_suffix = NULL;
-
-    void *c = flag_c_new(program_name);
-    flag_c_list_var(c, &tags_from_flags, "t", "Tags to add to the new task");
-    flag_c_uint64_var(c, &priority, "p", DEFAULT_PRIORITY, "Priority of the new task");
-    flag_c_str_var(c, &id_suffix, "s", NULL, "Task ID optional suffix");
-    flag_c_bool_var(c, &help, "help", false, "Print this help message");
-    String_Builder sb_title = {0};
-
-    if (!flag_c_parse(c, argc, argv)) {
-        print_command_usage(stderr, self, program_name, c);
-        flag_c_print_error(c, stderr);
-        return false;
-    }
-
-    argc = flag_c_rest_argc(c);
-    argv = flag_c_rest_argv(c);
-
-    while (argc > 0) {
-        if (sb_title.count > 0) sb_append(&sb_title, ' ');
-        sb_append_cstr(&sb_title, shift(argv, argc));
-    }
-
-    if (help) {
-        print_command_usage(stdout, self, program_name, c);
-        return true;
-    }
-
-    char *dir_path = find_relative_tasks_directory();
-    if (!dir_path) return false;
-
-    String_View title = SVLIT(DEFAULT_TASK_TITLE);
-    if (sb_title.count > 0) {
-        title = sb_to_sv(sb_title);
-    }
-
-    Parsed_Tags parsed_tags = {0};
-    da_foreach(const char *, tags_cstr, &tags_from_flags) {
-        String_View unparsed_tags = sv_from_cstr(*tags_cstr);
-        String_View tag = {0};
-        while (unparsed_tags_next(&unparsed_tags, &tag)) {
-            da_append(&parsed_tags, tag);
-        }
-    }
-
-    if (!create_new_task(dir_path, id_suffix, title, priority, parsed_tags)) return false;
-
     return true;
 }
 
@@ -1140,6 +1070,24 @@ Command commands[] = {
         .run = setup_run,
     },
     {
+        .name = "set",
+        .signature = "-db DIR [-json] -expect FINGERPRINT -property KEY=VALUE [...] HUID",
+        .short_description = "Guarded atomic property update.",
+        .run = scheduler_run,
+    },
+    {
+        .name = "check",
+        .signature = "-db DIR [-json] -spec HUID",
+        .short_description = "Validate a selected spec and dependency closure.",
+        .run = scheduler_run,
+    },
+    {
+        .name = "ready",
+        .signature = "-db DIR [-json] -spec HUID",
+        .short_description = "Report dependency-eligible work; does not claim tasks.",
+        .run = scheduler_run,
+    },
+    {
         .name = "init",
         .signature = "[OPTIONS]",
         .short_description = "Create tasks/ directory in the current working directory if it doesn't exist yet.",
@@ -1155,7 +1103,7 @@ Command commands[] = {
         .name = "new",
         .signature = "[OPTIONS] [TITLE...]",
         .short_description = "Create a new task.",
-        .run = new_run,
+        .run = scheduler_run,
     },
     {
         .name = "todo",
@@ -1286,7 +1234,7 @@ bool help_run(Command *self, const char *program_name, int argc, char **argv)
     for (size_t i = 0; i < ARRAY_LEN(commands); ++i) {
         if (strcmp(command_name, commands[i].name) == 0) {
             char *help_flag = "-help";
-            if (!commands[i].run(&commands[i], program_name, 1, &help_flag)) return false;
+            if (!scheduler_dispatch(&commands[i], program_name, 1, &help_flag)) return false;
             return true;
         }
     }
@@ -1313,7 +1261,7 @@ int main(int argc, char **argv)
 
     for (size_t i = 0; i < ARRAY_LEN(commands); ++i) {
         if (strcmp(command_name, commands[i].name) == 0) {
-            if (!commands[i].run(&commands[i], program_name, argc, argv)) return 1;
+            if (!scheduler_dispatch(&commands[i], program_name, argc, argv)) return 1;
             return 0;
         }
     }
@@ -1339,6 +1287,9 @@ int main(int argc, char **argv)
 #include "update.c"
 #include "task.c"
 #include "setup.c"
+#include "store.c"
+#include "../thirdparty/sha256.c"
+#include "scheduler.c"
 
 #define NOB_IMPLEMENTATION
 #define NOB_OVERWRITE_TEMP_ON_REWIND

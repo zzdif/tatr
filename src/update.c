@@ -75,12 +75,15 @@ bool update_task(Task *task, Update update)
                 updated = true;
             }
             break;
-        case UOP_OPEN:
+        case UOP_OPEN: {
+            String_View *resolution = properties_get(&task->properties, SVLIT("RESOLUTION"));
+            if (resolution && resolution->count) { *resolution = SVNULL; updated = true; }
             if (!sv_eq(task->status, SVLIT("OPEN"))) {
                 task->status = SVLIT("OPEN");
                 updated = true;
             }
             break;
+        }
         case UOP_TAG:
             if (!parsed_tags_contains(task->parsed_tags, op->tag)) {
                 da_append(&task->parsed_tags, op->tag);

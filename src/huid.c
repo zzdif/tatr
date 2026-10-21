@@ -17,7 +17,7 @@
 // TODO: Test Task 1
 bool is_alnum_or_dash(char x)
 {
-    return isalnum(x) || x == '-';
+    return (x >= 'a' && x <= 'z') || (x >= 'A' && x <= 'Z') || (x >= '0' && x <= '9') || x == '-';
 }
 
 bool chop_huid(String_View *content, String_View *huid)
@@ -47,9 +47,11 @@ bool chop_huid(String_View *content, String_View *huid)
 
 bool is_valid_huid(const char *id)
 {
-    for (int i = 0; i < 8; ++i) if (!isdigit(*id++)) return false;
-    if (*id++ != '-')                                return false;
-    for (int i = 0; i < 6; ++i) if (!isdigit(*id++)) return false;
+    if (!id || strlen(id) < 15) return false;
+    for (int i = 0; i < 8; ++i) if (id[i] < '0' || id[i] > '9') return false;
+    if (id[8] != '-') return false;
+    for (int i = 9; i < 15; ++i) if (id[i] < '0' || id[i] > '9') return false;
+    id += 15;
     switch (*id++) {
     case '\0':  return true;  // Short
     case '-':   break;        // Extended
@@ -63,7 +65,11 @@ char *temp_new_huid(const char *suffix)
 {
     // TODO: Test Task 2
     time_t rawtime;
+#ifdef TASKS_TEST_FIXED_TIME
+    rawtime = TASKS_TEST_FIXED_TIME;
+#else
     time(&rawtime);
+#endif
     struct tm * timeinfo = gmtime(&rawtime);
     char *id = temp_sprintf("%04d%02d%02d-%02d%02d%02d",
         timeinfo->tm_year+1900,

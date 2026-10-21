@@ -354,6 +354,26 @@ int main(int argc, char **argv)
 
         cmd_append(&cmd, "sh", "tests/setup.sh", BUILD_FOLDER"tatr");
         if (!cmd_run(&cmd)) return 1;
+
+        cc(&cmd, compiler);
+        cmd_append(&cmd, "-o", BUILD_FOLDER"hash-test", "tests/hash.c", "thirdparty/sha256.c");
+        if (!cmd_run(&cmd)) return 1;
+        cmd_append(&cmd, BUILD_FOLDER"hash-test");
+        if (!cmd_run(&cmd)) return 1;
+        cc(&cmd, compiler);
+        cmd_append(&cmd, "-DSTORE_TESTING", "-o", BUILD_FOLDER"store-test", "tests/store.c", "src/store.c");
+        if (!cmd_run(&cmd)) return 1;
+        cmd_append(&cmd, BUILD_FOLDER"store-test");
+        if (!cmd_run(&cmd)) return 1;
+        for (int stage = 1; stage <= 3; ++stage) {
+            cc(&cmd, compiler);
+            cmd_append(&cmd, "-DSTORE_TESTING", "-DTASKS_TEST_FIXED_TIME=0", temp_sprintf("-DSTORE_TEST_FAILURE=%d", stage),
+                       "-o", temp_sprintf(BUILD_FOLDER"tatr-failure-%d", stage), SRC_FOLDER"tatr.c");
+            if (!cmd_run(&cmd)) return 1;
+        }
+        cmd_append(&cmd, "python3", "tests/scheduler.py", BUILD_FOLDER"tatr",
+                   BUILD_FOLDER"tatr-failure-1", BUILD_FOLDER"tatr-failure-2", BUILD_FOLDER"tatr-failure-3");
+        if (!cmd_run(&cmd)) return 1;
     }
 
     if (run) {

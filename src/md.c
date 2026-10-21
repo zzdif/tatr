@@ -53,14 +53,14 @@ bool md_expect_char(Md *md, char x)
 
 void md_trim_spaces(Md *md)
 {
-    while (isspace(md_char(md))) {
+    while (isspace((unsigned char)md_char(md))) {
         md_next_char(md);
     }
 }
 
 bool isspace_except_newline(char x)
 {
-    return isspace(x) && x != '\n' && x != '\r';
+    return isspace((unsigned char)x) && x != '\n' && x != '\r';
 }
 
 void md_trim_spaces_except_newline(Md *md)
@@ -88,6 +88,7 @@ bool task_md_extract_title(Md *md, String_View *title)
     }
     md_trim_spaces_except_newline(md);
     *title = md_chop_until_newline(md);
+    if (title->count && title->data[title->count-1] == '\r') title->count--;
     return true;
 }
 
@@ -107,7 +108,7 @@ void task_md_extract_properties(Md *md, Properties *ps)
         md_trim_spaces_except_newline(md);
 
         String_View key = sv_from_parts(md_cstr(md), 0);
-        while (!md_end(md) && isalnum(md_char(md))) {
+        while (!md_end(md) && isalnum((unsigned char)md_char(md))) {
             md_next_char(md);
             key.count += 1;
         }

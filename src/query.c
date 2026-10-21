@@ -173,8 +173,11 @@ Query_Match_Result task_matches_query(String_View original_src, Task task, Query
     return QUERY_MISMATCHED;
 }
 
+static bool query_quiet_diagnostics;
+
 void report_compile_query_diagnostic(String_View original_src, String_View src, const char *format, ...)
 {
+    if (query_quiet_diagnostics) return;
     int cursor = sv_utf8_len((String_View) {
         .data = original_src.data,
         .count = src.data - original_src.data,
@@ -258,6 +261,7 @@ bool compile_query_primary(String_View original_src, String_View *src, Query *qu
         return true;
     }
 
+    if (query_quiet_diagnostics) return false;
     fprintf(stderr, "What are primary expressions:\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "    :<tag>         - checks if task has a tag\n");
@@ -368,6 +372,7 @@ bool compile_query(String_View original_src, String_View *src, Query *query)
     if (!compile_query_expr(original_src, src, query)) return false;
     String_View end = {0};
     if (chop_next_query_token(src, &end)) {
+        if (query_quiet_diagnostics) return false;
         fprintf(stderr, "Supported infix operators:\n");
         fprintf(stderr, "\n");
         fprintf(stderr, "    and  or                  - logical operators\n");
