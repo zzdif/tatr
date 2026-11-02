@@ -89,7 +89,7 @@ static bool dir_stat(const struct stat *st)
 static bool open_database(Store *store, const char *db, char **identity)
 {
     const char *p;
-    int fd = -1, next;
+    int fd = -1, next = -1;
     size_t n, used = 1;
     char *path;
     struct stat st;
@@ -103,8 +103,14 @@ static bool open_database(Store *store, const char *db, char **identity)
 
     fd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (fd < 0) {
-        free(path);
-        return fail(store, "io_error", "open /");
+        int e = errno;
+        if (e != EPERM && e != EACCES) {
+            fail(store, "io_error", "open /");
+            goto error;
+        }
+        if (lstat(path, &st) < 0) goto open_error;
+        if (!dir_stat(&st)) goto unsafe_component;
+        errno = e;
     }
     p = db + 1;
     while (*p != '\0') {
@@ -116,61 +122,74 @@ static bool open_database(Store *store, const char *db, char **identity)
         while (*p == '/') ++p;
         if (part_len == 0) continue;
         if (part_len == 1 && part[0] == '.') continue;
-        if (part_len == 2 && part[0] == '.' && part[1] == '.') {
-            next = openat(fd, "..", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-            if (next < 0) { close(fd); free(path); return fail(store, "io_error", "open parent"); }
-            close(fd); fd = next;
+        bool parent = part_len == 2 && part[0] == '.' && part[1] == '.';
+        const char *name;
+        if (parent) {
             while (used > 1 && path[used-1] != '/') --used;
             if (used > 1) --used;
             path[used] = '\0';
-            continue;
+            name = "..";
+        } else {
+            if (used != 1) path[used++] = '/';
+            name = path + used;
+            memcpy(path + used, part, part_len);
+            used += part_len;
+            path[used] = '\0';
         }
-        {
-            char *name = malloc(part_len + 1);
-            if (name == NULL) {
-                close(fd);
-                free(path);
-                return fail(store, "io_error", "malloc");
-            }
-            memcpy(name, part, part_len);
-            name[part_len] = '\0';
+        if (fd >= 0) {
             next = openat(fd, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-            free(name);
+            if (next < 0) {
+                if ((errno != EPERM && errno != EACCES) || (!parent && *p == '\0'))
+                    goto open_error;
+                close(fd);
+                fd = -1;
+            }
         }
-        if (next < 0) {
-            int e = errno;
-            close(fd);
-            free(path);
-            errno = e;
-            if (e == ENOENT) return fail(store, "database_not_found", "open database");
-            if (e == ELOOP || e == ENOTDIR) return unsafe(store, "database path component");
-            return fail(store, "io_error", "open database");
+        if (fd < 0) {
+            /* Metadata-only sandbox ancestors cannot be pinned; resume fd traversal ASAP. */
+            if (parent) {
+                if (lstat(path, &st) < 0) goto open_error;
+                if (!dir_stat(&st)) goto unsafe_component;
+            }
+            next = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+            if (next < 0) {
+                int e = errno;
+                if ((e != EPERM && e != EACCES) || (!parent && *p == '\0'))
+                    goto open_error;
+                if (!parent) {
+                    if (lstat(path, &st) < 0) goto open_error;
+                    if (!dir_stat(&st)) goto unsafe_component;
+                }
+                errno = e;
+                continue;
+            }
         }
-        if (fstat(next, &st) < 0 || !dir_stat(&st)) {
-            int e = errno;
-            close(next);
-            close(fd);
-            free(path);
-            errno = e;
-            return unsafe(store, "database path component");
-        }
-        close(fd);
+        if (fstat(next, &st) < 0 || !dir_stat(&st)) goto unsafe_component;
+        if (fd >= 0) close(fd);
         fd = next;
-        if (used != 1) path[used++] = '/';
-        memcpy(path + used, part, part_len);
-        used += part_len;
-        path[used] = '\0';
+        next = -1;
     }
+    if (fd < 0) goto open_error;
     if (fstat(fd, &st) < 0 || !dir_stat(&st)) {
-        int e = errno;
-        close(fd);
-        free(path);
-        errno = e;
-        return unsafe(store, "database path");
+        unsafe(store, "database path");
+        goto error;
     }
     *identity = path;
     store->fd = fd;
     return true;
+
+open_error:
+    if (errno == ENOENT) fail(store, "database_not_found", "open database");
+    else if (errno == ELOOP || errno == ENOTDIR) unsafe(store, "database path component");
+    else fail(store, "io_error", "open database");
+    goto error;
+unsafe_component:
+    unsafe(store, "database path component");
+error:
+    if (next >= 0) close(next);
+    if (fd >= 0) close(fd);
+    free(path);
+    return false;
 }
 
 bool store_open(Store *store, const char *db, bool exclusive)

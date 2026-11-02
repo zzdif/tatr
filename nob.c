@@ -365,6 +365,11 @@ int main(int argc, char **argv)
         if (!cmd_run(&cmd)) return 1;
         cmd_append(&cmd, BUILD_FOLDER"store-test");
         if (!cmd_run(&cmd)) return 1;
+        cc(&cmd, compiler);
+        cmd_append(&cmd, "-o", BUILD_FOLDER"tatr-sandbox", "tests/sandbox.c");
+        if (!cmd_run(&cmd)) return 1;
+        cmd_append(&cmd, "python3", "tests/sandbox.py", BUILD_FOLDER"tatr-sandbox");
+        if (!cmd_run(&cmd)) return 1;
         for (int stage = 1; stage <= 3; ++stage) {
             cc(&cmd, compiler);
             cmd_append(&cmd, "-DSTORE_TESTING", "-DTASKS_TEST_FIXED_TIME=0", temp_sprintf("-DSTORE_TEST_FAILURE=%d", stage),
